@@ -1,0 +1,56 @@
+[project]
+name = "agentfix"
+version = "0.1.0"
+description = "A teaching coding agent, built on LangGraph: tools, a graph, and verification"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=1.0",
+    "langchain-core>=1.0",
+    "langchain-openai>=1.0",
+]
+
+[project.optional-dependencies]
+eval = ["datasets>=2.20.0"]
+dev = ["ruff>=0.6", "black>=24.8", "mypy>=1.11", "coverage>=7.6"]
+
+[project.scripts]
+agentfix = "agentfix.cli:cli_entry"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentfix"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "ARG"]
+
+[tool.ruff.lint.per-file-ignores]
+# ARG (unused arguments) catches dead parameters, and is worth having on in src/. The three
+# exceptions are all the same case: a stand-in has to match the signature of the thing it
+# replaces, whether or not it reads every argument. `llm/fake.py` is a real BaseChatModel that
+# ignores `tools` and `stop` on purpose.
+"src/agentfix/llm/fake.py" = ["ARG"]
+"tests/*" = ["ARG"]
+"exercises/*" = ["ARG"]
+
+[tool.mypy]
+files = ["src/agentfix"]
+python_version = "3.12"
+strict = true
+
+[[tool.mypy.overrides]]
+module = "datasets.*"
+ignore_missing_imports = true
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.coverage.run]
+source = ["src/agentfix"]
