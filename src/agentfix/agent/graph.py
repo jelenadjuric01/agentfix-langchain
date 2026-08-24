@@ -180,10 +180,12 @@ def tests_passed_after(replies: Sequence[AnyMessage], current: bool) -> bool:
 def call_signature(call: dict[str, Any]) -> str:
     """An identity for "the same call again": tool name plus its arguments.
 
-    `sorted(...)` first so that {"a": 1, "b": 2} and {"b": 2, "a": 1} compare equal — key order
-    in the model's JSON is not meaningful.
+    Two calls the guard should treat as identical must produce the same string here. The
+    placeholder below runs, so the agent works — it is just wrong in two ways the tests name.
+
+    EXERCISE(stage-2): see exercises/stage_2/README.md
     """
-    return f"{call['name']}::{sorted((call.get('args') or {}).items())!r}"
+    return repr(call)
 
 
 def requested_calls(message: AIMessage) -> list[tuple[dict[str, Any], str, bool]]:
@@ -323,30 +325,20 @@ def build_graph(
         hits = state["guard_hits"]
 
         for call, current, parsed in requested_calls(message):
-            name = str(call.get("name") or "unknown")
+            name = str(call.get("name") or "unknown")  # noqa: F841 — used once you fill this in
 
-            # Loop guard. A model that repeats a call verbatim learned nothing from the result,
-            # so re-running it would burn a step for the same output. Send an observation
-            # instead and let it try something else.
-            if current == signature:
-                hits += 1
-                replies.append(
-                    ToolMessage(
-                        content=guard_observation(name, hits),
-                        tool_call_id=call["id"],
-                        name=name,
-                        # Marked an error only for the JSON case, matching what the model would
-                        # have been told had the call been answered normally.
-                        **({"status": "error"} if not parsed else {}),
-                    )
-                )
-                kind = "invalid call" if not parsed else "call"
-                tracer.note("tool", name, f"guarded — identical {kind} #{hits + 1} in a row")
-                continue
-
-            # Progress: reset the counter and remember this call as the new baseline.
-            hits = 0
-            signature = current
+            # The loop guard. `current` is this call's signature, `signature` the previous
+            # executed call's, `hits` the number of consecutive repeats. Decide whether this
+            # call runs at all — and answer it either way.
+            #
+            # `guard_observation(name, hits)` writes the text for a refusal, and
+            # `tracer.note("tool", name, ...)` records something the graph decided rather than
+            # something a tool did.
+            #
+            # Right now there is no guard at all: every call runs, however many times the model
+            # asks for it.
+            #
+            # EXERCISE(stage-2): see exercises/stage_2/README.md
 
             if parsed:
                 runnable.append(call)
@@ -402,23 +394,19 @@ def build_graph(
         return {"messages": [HumanMessage(content=NUDGE)]}
 
     def route_after_agent(state: AgentState) -> str:
-        """Where to go after a model turn. The only place a run can end successfully."""
+        """Where to go after a model turn. The only place a run can end successfully.
+
+        Return one of "tools", "nudge", or END.
+
+        `is_done(state)` reads the verdict. `state["step"]` is the turn just taken and
+        `max_steps` the budget. `message.tool_calls` and `message.invalid_tool_calls` are what
+        the model asked for.
+
+        EXERCISE(stage-1): see exercises/stage_1/README.md
+        """
         message = state["messages"][-1]
         assert isinstance(message, AIMessage)
-
-        # Tool calls never end the run on their own — always execute them and loop back, so
-        # the model can read the results. Note this skips the `is_done` check on purpose: the
-        # check belongs on a turn where the model had nothing more to do.
-        if message.tool_calls or message.invalid_tool_calls:
-            return "tools"
-
-        # Prose. This is the only place the run can end successfully — and it ends because the
-        # tests pass, not because the model stopped calling tools.
-        if is_done(state):
-            return END
-        if state["step"] >= max_steps:
-            return END
-        return "nudge"
+        raise NotImplementedError("stage 1: decide where a run goes after a model turn")
 
     def route_after_tools(state: AgentState) -> str:
         """Stop if the model is stuck or out of budget; otherwise take another turn.
