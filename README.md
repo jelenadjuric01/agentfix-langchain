@@ -12,6 +12,11 @@ parts of a hand-written agent a framework absorbs, which parts it leaves you hol
 parts it quietly breaks if you are not watching. See [What the framework gave
 us](#what-the-framework-gave-us).
 
+> **You are on `main`, the exercise branch.** Two functions in
+> `src/agentfix/agent/graph.py` are deliberately unwritten, so the exercise tests fail and
+> `agentfix solve` stops with a pointer to `exercises/README.md`. That is the intended starting
+> point. For the finished agent: `git checkout solutions`.
+
 Every exercise test runs against a scripted fake model, so the workshop does not depend on your
 Ollama setup working. Real inference is the reward, not a prerequisite.
 
