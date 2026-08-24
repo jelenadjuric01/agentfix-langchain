@@ -186,26 +186,6 @@ def call_signature(call: dict[str, Any]) -> str:
     return f"{call['name']}::{sorted((call.get('args') or {}).items())!r}"
 
 
-def answering_id(call: dict[str, Any]) -> str:
-    """The id to answer a call by, refusing clearly if the backend supplied none.
-
-    `ToolCall["id"]` is typed `str | None` upstream. `ChatOllama` always synthesises a uuid, so
-    this never fires here — but a different backend could omit it, and then `ToolMessage` fails
-    deep inside pydantic validation with a message about none of this.
-
-    Raised rather than papered over with a placeholder: an answer carrying an id the model never
-    sent is not an answer. There is nothing correct to do with such a call, so say which backend
-    behaviour broke the contract and stop.
-    """
-    call_id = call.get("id")
-    if not call_id:
-        raise RuntimeError(
-            f"the model's {call.get('name') or 'unknown'} call has no id, so it cannot be "
-            "answered; every tool call needs one to pair it with its reply"
-        )
-    return str(call_id)
-
-
 def requested_calls(message: AIMessage) -> list[tuple[dict[str, Any], str, bool]]:
     """Every call the model made this turn, as (call, guard signature, arguments parsed?).
 
@@ -218,6 +198,11 @@ def requested_calls(message: AIMessage) -> list[tuple[dict[str, Any], str, bool]
 
     Bad JSON comes first so that a turn mixing valid and invalid calls still answers all of
     them even if something below goes wrong mid-list.
+
+    Every call is assumed to carry an `id`, which is what a reply is paired with. Upstream types
+    it `str | None`; ChatOllama always synthesises a uuid, so it is always there for us. A
+    backend that omitted one would fail inside ToolMessage validation, and that is the right
+    outcome — there is no correct reply to a call you cannot address.
     """
     invalid = [
         (dict(bad), f"{bad.get('name') or 'unknown'}::INVALID::{bad.get('args')!r}", False)
@@ -310,7 +295,7 @@ def build_graph(
         tracer.note("tool", name, "invalid JSON arguments — not executed")
         return ToolMessage(
             content=INVALID_ARGUMENTS_MESSAGE.format(name=name),
-            tool_call_id=answering_id(call),
+            tool_call_id=call["id"],
             name=name,
             status="error",
         )
@@ -348,7 +333,7 @@ def build_graph(
                 replies.append(
                     ToolMessage(
                         content=guard_observation(name, hits),
-                        tool_call_id=answering_id(call),
+                        tool_call_id=call["id"],
                         name=name,
                         # Marked an error only for the JSON case, matching what the model would
                         # have been told had the call been answered normally.
@@ -436,7 +421,31 @@ def build_graph(
         return "nudge"
 
     def route_after_tools(state: AgentState) -> str:
-        """Stop if the model is stuck or out of budget; otherwise take another turn."""
+        """Stop if the model is stuck or out of budget; otherwise take another turn.
+
+        Note what is NOT here: `is_done`. A turn whose tools just went green does not end the
+        run — the model gets one more turn, and `route_after_agent` ends it there. That is a
+        deliberate choice rather than an oversight, and it is not free: measured on 01-shopcart,
+        the closing prose turn cost 6.5s of a 19.1s run and ~50 tokens of context.
+
+        What it buys is the closing statement itself. That turn is the only prose in a run, and
+        it is the evidence for the claim in the README that this agent does not reason — seven
+        tool-calling turns carrying no reasoning, and the one explanation arriving *after* the
+        fix was already verified. Ending on the green test result would stop collecting the
+        artifact that demonstrates the finding. It also keeps every trace the same shape, ending
+        on an `llm` line whether the run succeeded or not, which is what makes two of them
+        comparable side by side.
+
+        Adding the check here would be sound, and for a production agent it is probably right:
+        one model turn cheaper per solved task, and it would sharpen "done" from "the model had
+        nothing left to do AND the tests pass" to just "the tests pass". It would also make
+        `route_after_agent`'s `is_done` unreachable, since `tests_passed` only ever becomes true
+        in `tools_node` — so success would live in exactly one place instead of one real place
+        and one vestigial one.
+
+        The extra turn is not a soundness hole either way: if the model spends it on a write, the
+        fold clears the verdict and the run correctly carries on.
+        """
         if state["guard_hits"] >= MAX_GUARD_HITS:
             return END
         if state["step"] >= max_steps:

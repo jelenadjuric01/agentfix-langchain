@@ -33,7 +33,7 @@ uv run agentfix eval --suite humanevalfix --limit 5
 unittest only, no pytest anywhere — including inside the task fixtures the agent fixes.
 
 ```bash
-uv run python -m unittest discover -s tests -t .          # 194 tests, offline, ~5s
+uv run python -m unittest discover -s tests -t .          # 193 tests, offline, ~5s
 AGENTFIX_LLM_TESTS=1 uv run python -m unittest discover -s tests -t .   # + live-model tests
 ```
 

@@ -18,7 +18,6 @@ from langgraph.prebuilt import ToolNode
 from agentfix.agent.graph import (
     MAX_GUARD_HITS,
     NUDGE,
-    answering_id,
     build_graph,
     run_agent,
     system_prompt,
@@ -226,12 +225,6 @@ class TestFailuresBecomeObservations(GraphTestCase):
             ["bad", "good"],
             "bad JSON is answered first, and neither call is left unanswered",
         )
-
-    def test_a_call_with_no_id_fails_loudly_rather_than_inside_pydantic(self):
-        """There is no correct reply to a call with no id, so say which contract broke."""
-        with self.assertRaises(RuntimeError) as ctx:
-            answering_id({"name": "read_file", "args": {}, "id": None})
-        self.assertIn("read_file", str(ctx.exception))
 
     def test_a_tool_that_raises_does_not_end_the_run(self):
         """ToolNode's default lets the exception through; the graph opts back in."""
