@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import stat
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -78,6 +79,35 @@ def load_task(task_dir: Path) -> Task:
     )
 
 
+# The one permission bit that matters here: owner-write. Added to whatever mode a file already
+# has rather than assigned, so nothing else about it changes.
+OWNER_WRITE = stat.S_IWUSR
+
+
+def _make_writable(root: Path) -> None:
+    """Give the owner write permission on `root` and everything below it.
+
+    `shutil.copytree` copies permissions along with content, so a read-only template produces a
+    read-only copy. Task fixtures are often handed out read-only on purpose — a workshop
+    checkout, a file off a mounted image, anything unpacked from an archive that recorded 0444 —
+    and the agent would then fail every `write_file` with PermissionError while the trace showed
+    a model doing everything right.
+
+    Directories need the bit too, and for a different reason than files: a file's own mode
+    controls writing to it, but creating, replacing or deleting a file requires write permission
+    on the directory holding it. `write_file` writes via a temp file and a rename, so without it
+    even a writable file cannot be replaced — and `rmtree` in the `finally` below could not
+    delete the copy either.
+    """
+    for path in (root, *root.rglob("*")):
+        # lstat/chmod on the link itself: following a symlink out of the workspace and changing
+        # permissions on the target is exactly what this must not do.
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode) or mode & OWNER_WRITE:
+            continue
+        path.chmod(mode | OWNER_WRITE)
+
+
 @contextmanager
 def workspace(task: Task) -> Iterator[Path]:
     """Copy the pristine template into a temp dir so every run starts identical.
@@ -100,6 +130,9 @@ def workspace(task: Task) -> Iterator[Path]:
     work_dir = temp_root / "repo"
     try:
         shutil.copytree(task.template_dir, work_dir)
+        # The copy inherits the template's permissions, which may be read-only. The agent owns
+        # this directory now, so make sure it can actually write in it.
+        _make_writable(work_dir)
         yield work_dir
     finally:
         # ignore_errors=True: cleanup must never mask the real error from the block above.

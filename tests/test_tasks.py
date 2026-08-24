@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import sys
 
 from agentfix.tasks.loader import DEFAULT_PROMPT, load_task, workspace
@@ -60,6 +61,36 @@ class TestWorkspace(TempDirTestCase):
         with workspace(task) as work_dir:
             (work_dir / "a.py").write_text("rewritten\n", encoding="utf-8")
         self.assertEqual((task.template_dir / "a.py").read_text(), "original\n")
+
+    def test_a_read_only_template_still_produces_a_writable_copy(self):
+        """Workshop fixtures are often handed out read-only; the copy must not inherit that."""
+        task = self._task()
+        (task.template_dir / "pkg").mkdir()
+        (task.template_dir / "pkg" / "b.py").write_text("original\n", encoding="utf-8")
+        for path in (
+            task.template_dir / "pkg" / "b.py",
+            task.template_dir / "a.py",
+            task.template_dir / "pkg",
+            task.template_dir,
+        ):
+            path.chmod(0o555 if path.is_dir() else 0o444)
+        try:
+            with workspace(task) as work_dir:
+                (work_dir / "a.py").write_text("rewritten\n", encoding="utf-8")
+                # A rename into the directory, which is what write_file actually does.
+                scratch = work_dir / "pkg" / "b.py.tmp"
+                scratch.write_text("rewritten\n", encoding="utf-8")
+                scratch.replace(work_dir / "pkg" / "b.py")
+                self.assertEqual((work_dir / "pkg" / "b.py").read_text(), "rewritten\n")
+                captured = work_dir
+        finally:
+            for path in (task.template_dir, task.template_dir / "pkg"):
+                path.chmod(0o755)
+
+        # The read-only template is unchanged, and the copy was still cleaned up.
+        self.assertEqual((task.template_dir / "a.py").read_text(), "original\n")
+        self.assertEqual(stat.S_IMODE((task.template_dir / "a.py").stat().st_mode), 0o444)
+        self.assertFalse(captured.exists())
 
     def test_the_copy_is_deleted_on_the_way_out(self):
         with workspace(self._task()) as work_dir:
