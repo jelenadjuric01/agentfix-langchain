@@ -140,14 +140,14 @@ def _check_ollama_installed() -> Check:
 
 
 def _check_server(config: LLMConfig) -> Check:
-    payload = _get_json(f"{config.native_api_url}/api/tags")
+    payload = _get_json(f"{config.api_url}/api/tags")
     if payload is None:
         return Check("ollama server", False, SERVE_HINT)
-    return Check("ollama server", True, f"reachable at {config.native_api_url}")
+    return Check("ollama server", True, f"reachable at {config.api_url}")
 
 
 def _check_model_present(config: LLMConfig) -> Check:
-    payload = _get_json(f"{config.native_api_url}/api/tags") or {}
+    payload = _get_json(f"{config.api_url}/api/tags") or {}
     names = [model.get("name", "") for model in payload.get("models", [])]
     if any(name.split(":")[0] == config.model for name in names):
         return Check("model present", True, config.model)
@@ -185,7 +185,7 @@ def _check_generation(config: LLMConfig) -> Check:
 
 def _check_context(config: LLMConfig) -> Check:
     """The single most consequential setting, and the one nothing else will tell you about."""
-    payload = _get_json(f"{config.native_api_url}/api/ps")
+    payload = _get_json(f"{config.api_url}/api/ps")
     if payload is None:
         return Check("context window", False, f"cannot read /api/ps — {SERVE_HINT}")
 

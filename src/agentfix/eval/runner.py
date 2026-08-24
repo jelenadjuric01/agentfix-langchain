@@ -13,6 +13,7 @@ Steps, tokens and peak context are reported alongside it because an agent that s
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -21,6 +22,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agentfix.agent.graph import MAX_STEPS, AgentResult
+from agentfix.agent.trace import TraceEvent
 from agentfix.config import REPO_ROOT
 from agentfix.eval.humanevalfix import load_vendored_rows, write_task_dir
 from agentfix.runner import solve_task
@@ -42,6 +44,11 @@ class EvalReport:
         if not self.results:
             return 0.0  # an empty suite scores zero, rather than dividing by zero
         return sum(1 for result in self.results if result.solved) / len(self.results)
+
+    @property
+    def crashes(self) -> tuple[AgentResult, ...]:
+        """Rows where the run failed, as distinct from the agent failing to fix the bug."""
+        return tuple(result for result in self.results if result.error)
 
     @property
     def peak_prompt_tokens(self) -> int:
@@ -68,7 +75,7 @@ class EvalReport:
             f"{'task':<24} {'solved':<8} {'steps':<7} {'tokens':<9} {'peak ctx':<10} {'seconds':<8}"
         )
         rows = [
-            f"{r.task_id:<24} {str(r.solved):<8} {r.steps_used:<7} "
+            f"{r.task_id:<24} {('CRASH' if r.error else str(r.solved)):<8} {r.steps_used:<7} "
             f"{r.prompt_tokens + r.completion_tokens:<9} {r.peak_prompt_tokens:<10} "
             f"{r.duration_s:<8}"
             for r in self.results
@@ -77,19 +84,61 @@ class EvalReport:
             f"\npass@1 = {self.pass_at_1:.2f}  ({len(self.results)} task(s))"
             f"  peak prompt = {self.peak_prompt_tokens} tok"
         )
+        if self.crashes:
+            # Said next to the number, because that is where it will be read from.
+            summary += (
+                f"\n{len(self.crashes)} of {len(self.results)} task(s) CRASHED — "
+                "that part of this number measures the harness, not the agent"
+            )
         return "\n".join([header, "-" * len(header), *rows]) + summary
+
+
+def crashed(task_dir: Path, error: Exception) -> AgentResult:
+    """An unsolved result standing in for a task whose run raised.
+
+    Recorded rather than propagated, because the alternative is worse than it looks: a suite
+    of twenty HumanEvalFix tasks is ten minutes of a real model, and one exception on task
+    seventeen would otherwise discard all sixteen finished results along with it. A crash is a
+    fact about a task, so it belongs in the row for that task.
+    """
+    return AgentResult(
+        task_id=task_dir.name,
+        solved=False,
+        steps_used=0,
+        prompt_tokens=0,
+        completion_tokens=0,
+        duration_s=0.0,
+        trace=(TraceEvent(0, "error", type(error).__name__, str(error), 0, 0.0),),
+        # Duplicated out of the trace on purpose: `to_json` drops the trace, so without this
+        # field the report said `solved: false` and kept no record of the fact that no model was
+        # ever reached. A row that cannot explain itself becomes a publishable-looking
+        # `pass@1 = 0.00` that actually means "the harness was broken".
+        error=f"{type(error).__name__}: {error}",
+    )
 
 
 def evaluate(
     task_dirs: list[Path], llm: BaseChatModel | None = None, max_steps: int = MAX_STEPS
-) -> EvalReport:
+) -> tuple[AgentResult, ...]:
     """Run the agent over the given tasks, in order, one attempt each.
 
-    Sequential on purpose: the local model serves one request at a time, so running tasks
-    concurrently would not be faster, and it would make the timing numbers meaningless.
+    Sequential on purpose, and measured rather than assumed: against this Ollama server, three
+    requests took 1.7s run one after another and 2.8s run concurrently — a 0.59x "speedup".
+    One local model is one set of weights being time-shared, so concurrency here buys nothing
+    and costs the per-task timings their meaning. `abatch(max_concurrency=n)` is right there if
+    you point this at a hosted model, and wrong for the one in the README.
+
+    Returns the results rather than a report: the suite name belongs to whoever knows which
+    suite this is, which is `run_suite`.
     """
-    results = [solve_task(task_dir, llm=llm, max_steps=max_steps) for task_dir in task_dirs]
-    return EvalReport(suite="custom", results=tuple(results))
+    results: list[AgentResult] = []
+    for task_dir in task_dirs:
+        try:
+            results.append(solve_task(task_dir, llm=llm, max_steps=max_steps))
+        except Exception as error:  # noqa: BLE001 — one task's crash must not end the suite
+            print(f"  {task_dir.name}: run failed — {type(error).__name__}: {error}")
+            results.append(crashed(task_dir, error))
+    return tuple(results)
 
 
 def run_suite(suite: str, limit: int = 3, llm: BaseChatModel | None = None) -> int:
@@ -101,9 +150,7 @@ def run_suite(suite: str, limit: int = 3, llm: BaseChatModel | None = None) -> i
     if suite == "workshop":
         # Discovered by glob rather than hardcoded, so adding a task directory is enough.
         task_dirs = sorted(p.parent for p in WORKSHOP_TASKS_DIR.glob("*/task.json"))[:limit]
-        report = EvalReport("workshop", evaluate(task_dirs, llm=llm).results)
-        _publish(report)
-        return 0
+        return _finish(EvalReport("workshop", evaluate(task_dirs, llm=llm)))
 
     # HumanEvalFix tasks do not exist on disk: they are generated from a vendored JSON subset
     # into a temp directory, used, and thrown away. Keeps a benchmark out of the repo while
@@ -111,12 +158,43 @@ def run_suite(suite: str, limit: int = 3, llm: BaseChatModel | None = None) -> i
     with tempfile.TemporaryDirectory() as temp:
         rows = load_vendored_rows()[:limit]
         task_dirs = [write_task_dir(row, Path(temp)) for row in rows]
-        report = EvalReport("humanevalfix", evaluate(task_dirs, llm=llm).results)
+        report = EvalReport("humanevalfix", evaluate(task_dirs, llm=llm))
 
     # Published outside the `with` block: the temp tasks are gone by now, but the results are
     # values, not files, so nothing is lost.
+    return _finish(report)
+
+
+def _finish(report: EvalReport) -> int:
+    """Publish the report and decide the process exit code.
+
+    Two behaviours worth having, both learned from watching this go wrong:
+
+    A run where EVERY task crashed has measured nothing, so it must not overwrite the last good
+    `results/<suite>.json` — the numbers in that file were real and these are not. It goes to a
+    separate `.crashed.json` instead, and the diagnosis goes to stderr where a redirected stdout
+    cannot hide it.
+
+    And the exit code is non-zero if anything crashed. `run_suite` used to `return 0`
+    unconditionally, so a CI job, a Makefile or an `&&` chain could not tell a broken harness
+    from a bad agent — the two things this repo exists to keep apart.
+    """
+    print(report.format_table())
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if report.crashes and len(report.crashes) == len(report.results):
+        target = RESULTS_DIR / f"{report.suite}.crashed.json"
+        target.write_text(json.dumps(report.to_json(), indent=2) + "\n", encoding="utf-8")
+        print(
+            f"\nevery task crashed — nothing was measured, so {report.suite}.json was left "
+            f"alone. First reason: {report.crashes[0].error}",
+            file=sys.stderr,
+        )
+        print(f"\nwrote {target}")
+        return 1
+
     _publish(report)
-    return 0
+    return 1 if report.crashes else 0
 
 
 def _publish(report: EvalReport) -> None:

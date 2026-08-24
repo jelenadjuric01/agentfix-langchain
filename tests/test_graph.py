@@ -8,8 +8,22 @@ before the agent's write and really is green after it.
 from __future__ import annotations
 
 import sys
+import time
+from unittest import mock
 
-from agentfix.agent.graph import MAX_GUARD_HITS, NUDGE, is_done, run_agent, system_prompt
+from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.prebuilt import ToolNode
+
+from agentfix.agent.graph import (
+    MAX_GUARD_HITS,
+    NUDGE,
+    answering_id,
+    build_graph,
+    run_agent,
+    system_prompt,
+)
+from agentfix.agent.state import initial_state
 from agentfix.agent.trace import Tracer
 from agentfix.llm.fake import (
     FakeChatModel,
@@ -51,7 +65,7 @@ class GraphTestCase(TempDirTestCase):
         self.tools = [
             ListFilesTool(root=self.tmp),
             ReadFileTool(root=self.tmp),
-            WriteFileTool(root=self.tmp, on_write=self.run_tests.invalidate),
+            WriteFileTool(root=self.tmp),
             self.run_tests,
         ]
 
@@ -62,9 +76,7 @@ class GraphTestCase(TempDirTestCase):
         replies = list(replies)
         max_steps = len(replies) if max_steps is None else max_steps
         llm = FakeChatModel(replies=replies)
-        result = run_agent(
-            self.task, llm, self.tools, self.run_tests, max_steps=max_steps, tracer=tracer
-        )
+        result = run_agent(self.task, llm, self.tools, max_steps=max_steps, tracer=tracer)
         return result, llm
 
 
@@ -93,6 +105,23 @@ class TestHappyPath(GraphTestCase):
         self.assertEqual((self.tmp / "cart.py").read_text(), FIXED)
         self.assertGreater(result.prompt_tokens, 0)
         self.assertGreater(result.peak_prompt_tokens, 0)
+
+    def test_the_token_accounting_sums_and_the_peak_is_a_high_water_mark(self):
+        """Pins all three numeric reducers at once.
+
+        Without this, dropping `operator.add` from the token counters or `keep_larger` from the
+        peak changed nothing that any test noticed — the only assertions were `> 0`.
+        """
+        result, _ = self.run_with(
+            [
+                assistant_tool_call("run_tests", {}, prompt_tokens=100),
+                assistant_tool_call("list_files", {}, prompt_tokens=300),
+                assistant_text("done", prompt_tokens=200),
+            ]
+        )
+        self.assertEqual(result.prompt_tokens, 600, "the bill is the sum of every turn")
+        self.assertEqual(result.peak_prompt_tokens, 300, "the peak is the largest single prompt")
+        self.assertGreater(result.completion_tokens, 0)
 
     def test_the_history_is_append_only(self):
         """Byte-stable prefix -> the server's KV cache stays valid across turns."""
@@ -171,6 +200,39 @@ class TestFailuresBecomeObservations(GraphTestCase):
         self.assertEqual(len(answers), 1, "an unanswered tool call breaks the next request")
         self.assertIn("JSON", str(answers[-1].content))
 
+    def test_a_turn_mixing_a_broken_and_a_good_call_answers_both(self):
+        """`requested_calls` exists to flatten the two fields; nothing tested them together.
+
+        The API rejects a request that leaves any `tool_call_id` unanswered, so a turn carrying
+        one unparseable call and one good one has to come back with two replies.
+        """
+        mixed = AIMessage(
+            content="",
+            tool_calls=[{"name": "run_tests", "args": {}, "id": "good"}],
+            invalid_tool_calls=[
+                {
+                    "name": "read_file",
+                    "args": '{"path": ',
+                    "id": "bad",
+                    "error": "Function arguments are not valid JSON.",
+                }
+            ],
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+        _, llm = self.run_with([mixed, assistant_text("giving up")], max_steps=2)
+        answers = [m for m in llm.calls[-1] if getattr(m, "tool_call_id", None)]
+        self.assertEqual(
+            [m.tool_call_id for m in answers],
+            ["bad", "good"],
+            "bad JSON is answered first, and neither call is left unanswered",
+        )
+
+    def test_a_call_with_no_id_fails_loudly_rather_than_inside_pydantic(self):
+        """There is no correct reply to a call with no id, so say which contract broke."""
+        with self.assertRaises(RuntimeError) as ctx:
+            answering_id({"name": "read_file", "args": {}, "id": None})
+        self.assertIn("read_file", str(ctx.exception))
+
     def test_a_tool_that_raises_does_not_end_the_run(self):
         """ToolNode's default lets the exception through; the graph opts back in."""
         broken = ReadFileTool(root=self.tmp)
@@ -192,7 +254,9 @@ class TestFailuresBecomeObservations(GraphTestCase):
 
 class TestStopCondition(GraphTestCase):
     def test_not_done_before_the_tests_have_ever_run(self):
-        self.assertFalse(is_done(self.run_tests))
+        """The verdict starts False, so an agent that never runs the tests never solves."""
+        result, _ = self.run_with([assistant_text("looks fine to me")], max_steps=1)
+        self.assertFalse(result.solved)
 
     def test_not_done_when_the_model_only_claims_success(self):
         """The whole point: a model announcing victory is not evidence."""
@@ -227,7 +291,7 @@ class TestStopCondition(GraphTestCase):
         self.assertTrue(any(getattr(m, "content", None) == NUDGE for m in llm.calls[-1]))
 
     def test_a_write_invalidates_a_previously_green_result(self):
-        """Otherwise: run tests, pass, then break them, and is_done still says SOLVED."""
+        """Otherwise: run tests, pass, then break them, and the verdict still says SOLVED."""
         result, _ = self.run_with(
             [
                 assistant_tool_call("write_file", {"path": "cart.py", "content": FIXED}),
@@ -237,6 +301,61 @@ class TestStopCondition(GraphTestCase):
             ]
         )
         self.assertFalse(result.solved, "a stale green result must not survive a write")
+
+    def test_a_write_after_a_green_run_in_the_same_turn_ends_red(self):
+        """One message, two calls, and the ORDER of the fold decides the verdict.
+
+        An order-insensitive `tests_passed_after` passes every other test in this suite, so
+        without this the fold could be "simplified" into reporting SOLVED for code that was
+        never measured.
+        """
+        result, _ = self.run_with(
+            [
+                assistant_tool_call("write_file", {"path": "cart.py", "content": FIXED}),
+                assistant_tool_call("run_tests", {}),
+                # A different call in between, or the loop guard refuses the run_tests below as
+                # a repeat and it never executes — which is what defeated the first version of
+                # this test: no ExecResult was produced, so the fold order never mattered.
+                assistant_tool_call("list_files", {}),
+                # Green, then broken again, inside one turn.
+                assistant_tool_calls(
+                    [("run_tests", {}), ("write_file", {"path": "cart.py", "content": BUGGY})],
+                    call_ids=("c1", "c2"),
+                ),
+                assistant_text("done"),
+            ]
+        )
+        self.assertFalse(result.solved, "the write came last, so nothing has measured this code")
+        self.assertEqual((self.tmp / "cart.py").read_text(), BUGGY, "the write did happen")
+
+    def test_a_run_after_a_write_in_the_same_turn_ends_green(self):
+        """The mirror image: measured last, so the measurement stands."""
+        result, _ = self.run_with(
+            [
+                assistant_tool_calls(
+                    [("write_file", {"path": "cart.py", "content": FIXED}), ("run_tests", {})],
+                    call_ids=("c1", "c2"),
+                ),
+                assistant_text("done"),
+            ]
+        )
+        self.assertTrue(result.solved)
+
+    def test_a_turn_that_changes_nothing_leaves_a_green_verdict_alone(self):
+        """`tests_passed_after` is seeded with the verdict so far, not with False.
+
+        list_files neither measures nor modifies anything, so a green result stays green across
+        it. Reseeding from False each turn would nudge an agent that had already succeeded.
+        """
+        result, _ = self.run_with(
+            [
+                assistant_tool_call("write_file", {"path": "cart.py", "content": FIXED}),
+                assistant_tool_call("run_tests", {}),
+                assistant_tool_call("list_files", {}),
+                assistant_text("done"),
+            ]
+        )
+        self.assertTrue(result.solved)
 
     def test_the_agent_cannot_fake_success_by_rewriting_the_tests(self):
         result, _ = self.run_with(
@@ -314,6 +433,20 @@ class TestBudgetAndGuard(GraphTestCase):
         self.assertFalse(result.solved)
         self.assertLessEqual(llm.index, MAX_GUARD_HITS + 1, "a stuck model must be abandoned")
 
+    def test_the_second_repeat_warns_that_the_run_will_be_abandoned(self):
+        """Only the first wording was pinned; the escalation could be deleted unnoticed."""
+        tracer = Tracer()
+        _, llm = self.run_with(
+            [assistant_tool_call("list_files", {}, call_id=f"c{i}") for i in range(4)],
+            max_steps=4,
+            tracer=tracer,
+        )
+        answers = [str(m.content) for m in llm.calls[-1] if getattr(m, "tool_call_id", None)]
+        self.assertTrue(
+            any("abandoned" in a and str(MAX_GUARD_HITS) in a for a in answers),
+            "the escalated observation names the consequence",
+        )
+
     def test_making_progress_resets_the_guard(self):
         tracer = Tracer()
         self.run_with(
@@ -327,6 +460,172 @@ class TestBudgetAndGuard(GraphTestCase):
             tracer=tracer,
         )
         self.assertFalse(any("guarded" in e.detail for e in tracer.events))
+
+
+class TestToolNodeContract(GraphTestCase):
+    def test_the_calls_in_one_turn_execute_one_at_a_time(self):
+        """The oracle guarantee: a test run must never race a write in the same turn.
+
+        ToolNode batches through a real ThreadPoolExecutor, so without `max_concurrency=1` the
+        calls in one message run concurrently and `run_tests` can measure the file as it was
+        BEFORE a write in the same turn — a green verdict for code that no longer exists.
+        Message order is preserved either way, so nothing in the trace would look wrong.
+        """
+        timeline: list[str] = []
+        slow_write = WriteFileTool(root=self.tmp)
+        original = slow_write._run
+
+        def traced(path: str, content: str):
+            timeline.append("write-start")
+            time.sleep(0.3)
+            result = original(path=path, content=content)
+            timeline.append("write-end")
+            return result
+
+        object.__setattr__(slow_write, "_run", traced)
+        self.tools[2] = slow_write
+
+        real_run = self.run_tests._run
+
+        def traced_run():
+            timeline.append("run-start")
+            out = real_run()
+            timeline.append("run-end")
+            return out
+
+        object.__setattr__(self.run_tests, "_run", traced_run)
+
+        self.run_with(
+            [
+                assistant_tool_calls(
+                    [("write_file", {"path": "cart.py", "content": FIXED}), ("run_tests", {})],
+                    call_ids=("c1", "c2"),
+                ),
+                assistant_text("done"),
+            ],
+            max_steps=2,
+        )
+        self.assertEqual(
+            timeline,
+            ["write-start", "write-end", "run-start", "run-end"],
+            "the tests must not begin until the write has finished",
+        )
+
+    def test_a_dropped_tool_answer_raises_rather_than_corrupting_the_next_request(self):
+        """This invariant used to be an `assert`, which `python -O` removes.
+
+        If ToolNode ever answers fewer calls than it was given, the API rejects the NEXT
+        request — a turn away from the cause. Fail here instead, with the count.
+        """
+        with mock.patch.object(ToolNode, "invoke", return_value={"messages": []}):
+            with self.assertRaises(RuntimeError) as ctx:
+                self.run_with(
+                    [assistant_tool_call("run_tests", {}), assistant_text("done")], max_steps=2
+                )
+        self.assertIn("must get exactly one reply", str(ctx.exception))
+        self.assertIn("0 of 1", str(ctx.exception))
+
+
+class TestCheckpointing(GraphTestCase):
+    """State the framework can snapshot, which only works if the state holds everything."""
+
+    def _run(self, app, llm, state=None):
+        """Invoke `app` on thread "t". `state=None` starts a run; a partial dict resumes one."""
+        return app.invoke(
+            initial_state(system_prompt(self.tools), "Fix it.") if state is None else state,
+            config={"configurable": {"thread_id": "t"}, "callbacks": [Tracer()]},
+        )
+
+    def test_a_run_can_be_resumed_from_its_checkpoint(self):
+        """The verdict has to live in the state, or a resumed solved task comes back unsolved.
+
+        Two invocations against one saver: the fix is written in the first, the verifying test
+        run happens in the second, and the verdict crosses the gap because it is checkpointed
+        rather than held on a tool object that the second graph rebuilds empty.
+        """
+        saver = InMemorySaver()
+        first = FakeChatModel(
+            replies=[assistant_tool_call("write_file", {"path": "cart.py", "content": FIXED})]
+        )
+        app = build_graph(first, self.tools, Tracer(), max_steps=1, checkpointer=saver)
+        interrupted = self._run(app, first)
+        self.assertFalse(interrupted["tests_passed"], "written but not yet verified")
+
+        # A fresh model, a fresh graph, fresh tools — and `{"messages": []}` as the input, which
+        # adds nothing and so leaves every checkpointed value in place. This is a resume, not a
+        # second run: the history the model receives is the one from above.
+        second = FakeChatModel(
+            replies=[assistant_tool_call("run_tests", {}), assistant_text("done")]
+        )
+        resumed = build_graph(second, self.tools, Tracer(), max_steps=3, checkpointer=saver)
+        final = self._run(resumed, second, state={"messages": []})
+
+        self.assertTrue(final["tests_passed"], "the resumed run must see its own green suite")
+        self.assertGreaterEqual(
+            len(second.calls[0]),
+            len(interrupted["messages"]),
+            "the resumed model was sent the checkpointed history, not a bare prompt",
+        )
+
+        # Compared by content rather than by message equality: the checkpointer's serialiser
+        # round-trips a frozen dataclass artifact back as a plain dict, so a replayed
+        # ToolMessage is identical in everything the model sees but not `==` to the original.
+        self.assertEqual(
+            [m.content for m in final["messages"][: len(interrupted["messages"])]],
+            [m.content for m in interrupted["messages"]],
+        )
+        # The step budget is per-invocation, so the resumed run counted its own turns on top.
+        self.assertGreater(final["step"], interrupted["step"])
+
+    def test_the_verdict_itself_survives_a_resume(self):
+        """The test that would have caught the original bug, and the one I first got wrong.
+
+        `test_a_run_can_be_resumed_from_its_checkpoint` re-runs the suite after resuming, so its
+        green verdict is re-derived rather than restored — it would pass even if the verdict were
+        not checkpointed at all. Here run 2 never calls a tool, so the ONLY possible source of
+        `tests_passed` is the checkpoint.
+        """
+        saver = InMemorySaver()
+        first = FakeChatModel(
+            replies=[
+                assistant_tool_call("write_file", {"path": "cart.py", "content": FIXED}),
+                assistant_tool_call("run_tests", {}),
+            ]
+        )
+        app = build_graph(first, self.tools, Tracer(), max_steps=2, checkpointer=saver)
+        self.assertTrue(self._run(app, first)["tests_passed"])
+
+        second = FakeChatModel(replies=[assistant_text("already fixed")])
+        resumed = build_graph(second, self.tools, Tracer(), max_steps=1, checkpointer=saver)
+        final = self._run(resumed, second, state={"messages": []})
+
+        self.assertTrue(final["tests_passed"], "the verdict was not carried across the resume")
+        self.assertEqual(second.index, 1, "run 2 took exactly one turn")
+        self.assertFalse(
+            [m for m in second.calls[0] if getattr(m, "name", None) == "run_tests"][1:],
+            "run 2 must not have re-measured anything of its own",
+        )
+
+    def test_every_step_is_recoverable_from_the_history(self):
+        """`get_state_history` is what makes a run inspectable after the fact."""
+        saver = InMemorySaver()
+        llm = FakeChatModel(
+            replies=[
+                assistant_tool_call("run_tests", {}),
+                assistant_tool_call("write_file", {"path": "cart.py", "content": FIXED}),
+                assistant_tool_call("run_tests", {}),
+            ]
+        )
+        app = build_graph(llm, self.tools, Tracer(), max_steps=3, checkpointer=saver)
+        self._run(app, llm)
+        config = {"configurable": {"thread_id": "t"}}
+        # `.get`, not `[...]`: the history includes a snapshot taken before any node ran, whose
+        # values are just the input.
+        verdicts = [
+            snapshot.values.get("tests_passed") for snapshot in app.get_state_history(config)
+        ]
+        self.assertIn(True, verdicts, "the green run is in the history")
+        self.assertIn(False, verdicts, "so is the red one it started from")
 
 
 class TestTracing(GraphTestCase):

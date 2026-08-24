@@ -17,6 +17,8 @@ does *not* cover, and what this project does about them.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from pydantic import BaseModel
 
 # Every byte a tool returns is a byte of context the model must re-read on every later turn,
@@ -33,6 +35,23 @@ class NoArgs(BaseModel):
     An empty model rather than None: `bind_tools` needs *something* to convert into the
     `{"type": "object", "properties": {}}` the model is shown.
     """
+
+
+@dataclass(frozen=True)
+class WorkspaceChanged:
+    """Artifact returned by any tool that modified the workspace.
+
+    A tool returns two things: `content`, which the model reads, and `artifact`, which only
+    the graph reads (`response_format="content_and_artifact"`). This is the artifact that says
+    "whatever the tests last reported is now describing code that no longer exists."
+
+    Typed rather than a bare bool, and returned by the *tool* rather than wired up by the
+    caller, because the previous arrangement — runner.py passing `run_tests.invalidate` as a
+    write callback — only worked for the one pair of tools someone remembered to connect. Any
+    future tool that edits the workspace gets the invalidation by returning this.
+    """
+
+    path: str
 
 
 def truncate(text: str, limit: int = MAX_TOOL_OUTPUT_CHARS) -> str:

@@ -59,8 +59,8 @@ class TestSolveTask(TempDirTestCase):
         self.assertIn("shopcart/cart.py", listing)
         self.assertNotIn(str(SHOPCART.resolve()), listing)
 
-    def test_a_write_is_wired_to_invalidate_the_last_test_result(self):
-        """runner.py passes on_write=run_tests.invalidate; without it a stale green survives."""
+    def test_a_write_invalidates_the_last_test_result(self):
+        """write_file reports WorkspaceChanged; without it a stale green result survives."""
         llm = FakeChatModel(
             replies=[
                 assistant_tool_call("write_file", {"path": "shopcart/cart.py", "content": FIXED}),

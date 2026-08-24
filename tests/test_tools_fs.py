@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentfix.tools.base import TRUNCATION_MARKER
+from agentfix.tools.base import TRUNCATION_MARKER, WorkspaceChanged
 from agentfix.tools.fs import (
     ListFilesTool,
     PathEscapeError,
@@ -119,13 +119,24 @@ class TestWriteFile(TempDirTestCase):
         self.assertIn("Refused", out)
         self.assertFalse((self.tmp.parent / "evil.py").exists())
 
-    def test_the_on_write_callback_fires_only_on_a_successful_write(self):
-        fired: list[int] = []
-        tool = WriteFileTool(root=self.tmp, on_write=lambda: fired.append(1))
-        tool.invoke({"path": "a.py", "content": "x = 1\n"})
-        self.assertEqual(len(fired), 1)
-        tool.invoke({"path": "b.py", "content": "def f(:\n"})  # rejected
-        self.assertEqual(len(fired), 1, "a rejected write must not invalidate the test result")
+    def _message(self, tool: WriteFileTool, path: str, content: str):
+        call = {"name": "write_file", "args": {"path": path, "content": content}}
+        return tool.invoke({**call, "id": "c1", "type": "tool_call"})
+
+    def test_a_successful_write_reports_the_workspace_changed(self):
+        """That artifact is what invalidates the last test result, in the graph's state."""
+        message = self._message(WriteFileTool(root=self.tmp), "a.py", "x = 1\n")
+        self.assertIsInstance(message.artifact, WorkspaceChanged)
+        self.assertEqual(message.artifact.path, "a.py")
+
+    def test_a_rejected_write_reports_no_change(self):
+        """A refusal changed nothing, so it must not invalidate a green test result."""
+        tool = WriteFileTool(root=self.tmp)
+        self.assertIsNone(self._message(tool, "b.py", "def f(:\n").artifact)
+        self.assertIsNone(self._message(tool, "../evil.py", "x = 1\n").artifact)
+        (self.tmp / "tests").mkdir()
+        (self.tmp / "tests" / "test_x.py").write_text("original")
+        self.assertIsNone(self._message(tool, "tests/test_x.py", "x = 1\n").artifact)
 
     def test_creates_missing_parent_directories(self):
         WriteFileTool(root=self.tmp).invoke({"path": "deep/nested/a.py", "content": "x = 1\n"})

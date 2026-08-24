@@ -28,18 +28,19 @@ class TestRunTestsTool(TempDirTestCase):
         out = self._tool(FakeBackend(ExecResult(True, "Ran 2 tests\nOK", 0.1))).invoke({})
         self.assertTrue(out.startswith("All tests passed."))
 
-    def test_the_result_is_remembered_for_is_done(self):
+    def test_the_exec_result_comes_back_as_the_message_artifact(self):
+        """The graph reads this, not the prose: a stop condition must not parse text."""
         tool = self._tool(FakeBackend(ExecResult(True, "OK", 0.1)))
-        self.assertIsNone(tool.last_result)
-        tool.invoke({})
-        self.assertIsNotNone(tool.last_result)
-        self.assertTrue(tool.last_result.passed)
+        message = tool.invoke({"name": "run_tests", "args": {}, "id": "c1", "type": "tool_call"})
+        self.assertIsInstance(message.artifact, ExecResult)
+        self.assertTrue(message.artifact.passed)
+        self.assertIn("All tests passed.", str(message.content))
 
-    def test_invalidate_discards_a_stale_green_result(self):
+    def test_the_tool_keeps_no_state_of_its_own(self):
+        """The verdict lives in the graph state, which is what makes a run resumable."""
         tool = self._tool(FakeBackend(ExecResult(True, "OK", 0.1)))
         tool.invoke({})
-        tool.invalidate()
-        self.assertIsNone(tool.last_result, "a write must not leave a green result behind")
+        self.assertFalse(hasattr(tool, "last_result"))
 
     def test_the_backend_is_asked_to_run_the_task_command_in_the_workspace(self):
         backend = FakeBackend()

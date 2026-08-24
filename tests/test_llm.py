@@ -83,11 +83,14 @@ class TestLLMConfig(unittest.TestCase):
         self.assertEqual(config.base_url, DEFAULT_BASE_URL)
         self.assertEqual(config.model, DEFAULT_MODEL)
 
-    def test_the_native_api_url_strips_the_v1_suffix(self):
-        """`/v1` cannot report the loaded context length; Ollama's own `/api/ps` can."""
+    def test_the_api_url_tolerates_a_leftover_v1_suffix(self):
+        """An environment set up for the old ChatOpenAI client must not produce /v1/api/ps."""
         self.assertEqual(
-            LLMConfig(base_url="http://localhost:11434/v1").native_api_url,
+            LLMConfig(base_url="http://localhost:11434/v1").api_url,
             "http://localhost:11434",
+        )
+        self.assertEqual(
+            LLMConfig(base_url="http://localhost:11434/").api_url, "http://localhost:11434"
         )
 
     def test_env_overrides(self):

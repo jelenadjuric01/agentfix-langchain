@@ -14,13 +14,18 @@ only thing between a model-supplied path and your real filesystem.
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
-from agentfix.tools.base import MAX_FILE_READ_CHARS, NoArgs, truncate
+from agentfix.tools.base import (
+    MAX_FILE_READ_CHARS,
+    NoArgs,
+    WorkspaceChanged,
+    truncate,
+)
 
 # Noise the model should never spend context on.
 IGNORED_DIRS = {"__pycache__", ".git", ".venv", ".pytest_cache", ".mypy_cache"}
@@ -170,6 +175,11 @@ class WriteFileTool(BaseTool):
     )
     args_schema: type[BaseModel] = WriteArgs
 
+    # A successful write returns a `WorkspaceChanged` artifact alongside the text the model
+    # reads. That artifact is what invalidates the last test result: it described the code as
+    # it was. Every other branch below returns `None`, so a refused write invalidates nothing.
+    response_format: Literal["content", "content_and_artifact"] = "content_and_artifact"
+
     root: Path
 
     # The relative paths this tool may write, taken from the task's pristine template.
@@ -187,23 +197,15 @@ class WriteFileTool(BaseTool):
     # only tests use.
     allowed: frozenset[str] | None = None
 
-    # A callback invoked after a successful write. runner.py passes `run_tests.invalidate`, so
-    # writing a file discards the previous test result: that result described the code as it
-    # was, and stale green tests would let `is_done` report SOLVED for a file just changed.
-    on_write: Callable[[], None] | None = None
-
-    # `Callable` is not a type pydantic can validate, so it has to be allowed explicitly.
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    def _run(self, path: str, content: str) -> str:
+    def _run(self, path: str, content: str) -> tuple[str, WorkspaceChanged | None]:
         try:
             target = resolve_in_root(self.root, path)
         except PathEscapeError:
-            return f"Refused: {path} is outside the project root."
+            return f"Refused: {path} is outside the project root.", None
 
         # Guard the oracle: the tests are the specification, so they are not writable.
         if is_test_path(self.root, target):
-            return PROTECTED_HINT.format(path=path)
+            return PROTECTED_HINT.format(path=path), None
 
         # Then the allow-list. Compared on the resolved path's own relative form, so a
         # case-variant alias of a real file ("Tests/TEST_CART.PY") does not match the template
@@ -211,7 +213,7 @@ class WriteFileTool(BaseTool):
         if self.allowed is not None:
             relative = str(target.relative_to(self.root.resolve()))
             if relative not in self.allowed:
-                return NEW_FILE_HINT.format(path=path)
+                return NEW_FILE_HINT.format(path=path), None
 
         # Parse before writing. `ast.parse` compiles the text without executing any of it, so
         # it is a syntax check with no side effects. Rejecting a broken file up front gives a
@@ -221,13 +223,13 @@ class WriteFileTool(BaseTool):
             ast.parse(content)
         except SyntaxError as error:
             return (
-                f"Not written — the content has a syntax error on line {error.lineno}: {error.msg}"
+                f"Not written — the content has a syntax error on line "
+                f"{error.lineno}: {error.msg}",
+                None,
             )
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        if self.on_write is not None:
-            self.on_write()
         # Report the size rather than echoing the content: the model just sent it, and
         # repeating it back would double its cost in context for no new information.
-        return f"Wrote {len(content)} characters to {path}."
+        return f"Wrote {len(content)} characters to {path}.", WorkspaceChanged(path=path)

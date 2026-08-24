@@ -12,9 +12,10 @@ from pathlib import Path
 # however the CLI was invoked.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# The OpenAI-compatible endpoint Ollama serves. `ChatOpenAI` speaks this protocol, which is
-# why the same client works against vLLM or any other /v1 server.
-DEFAULT_BASE_URL = "http://localhost:11434/v1"
+# Ollama's own API root — not the `/v1` compatibility endpoint. `ChatOllama` speaks the
+# native protocol, which is the only one that honours `num_ctx` and `num_predict`; see
+# llm/client.py for what the `/v1` endpoint silently discarded.
+DEFAULT_BASE_URL = "http://localhost:11434"
 
 # The model the agent talks to is the one derived by `ollama create -f Modelfile`, not the
 # raw GGUF pull: only the derived model carries `num_ctx 16384`, because Ollama's /v1
@@ -42,16 +43,24 @@ class LLMConfig:
     top_p: float = 0.95
 
     # Cap on ONE reply. Relevant because write_file must emit a complete file: this is the
-    # ceiling on how large a file the agent can rewrite in a single turn.
+    # ceiling on how large a file the agent can rewrite in a single turn. Reaches the server as
+    # Ollama's `num_predict`.
     max_tokens: int = 1024
 
-    # Sent with every request, but Ollama's /v1 endpoint ignores it — see llm/client.py.
+    # The context window the model is loaded with. Honoured now that the client speaks Ollama's
+    # native API, which is why `agentfix doctor` can check it and expect to be obeyed.
     num_ctx: int = 16384
 
     @property
-    def native_api_url(self) -> str:
-        """Ollama's own API root. `/v1` cannot report the loaded context length; `/api/ps` can."""
-        return self.base_url.rsplit("/v1", 1)[0].rstrip("/")
+    def api_url(self) -> str:
+        """`base_url` with a trailing `/v1` removed, if someone's environment still has one.
+
+        Tolerance rather than a second endpoint: every request this project makes now goes to
+        Ollama's native API, so a `MELLUM_BASE_URL` left over from the `/v1` days would
+        otherwise produce URLs like `.../v1/api/ps`.
+        """
+        trimmed = self.base_url.rstrip("/")
+        return trimmed[: -len("/v1")].rstrip("/") if trimmed.endswith("/v1") else trimmed
 
     @classmethod
     def from_env(cls) -> LLMConfig:

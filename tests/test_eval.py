@@ -2,23 +2,56 @@
 
 from __future__ import annotations
 
+import io
 import json
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 
 from agentfix.agent.graph import AgentResult
+from agentfix.llm.fake import FakeChatModel, assistant_text
 from agentfix.eval.humanevalfix import (
     HumanEvalFixRow,
     as_unittest_module,
     load_vendored_rows,
     write_task_dir,
 )
-from agentfix.eval.runner import EvalReport
+from agentfix.eval.runner import EvalReport, crashed, evaluate
 from agentfix.tasks.loader import load_task
 from tests.support import TempDirTestCase
 
 
 def result(task_id: str, solved: bool, steps: int = 4, peak: int = 100) -> AgentResult:
     return AgentResult(task_id, solved, steps, 1000, 200, 1.0, (), peak)
+
+
+class TestOneCrashDoesNotEndTheSuite(TempDirTestCase):
+    """Ten minutes of a real model must not be thrown away by one exception."""
+
+    def _task(self, name: str, prompt: str = "Fix it.") -> None:
+        (self.tmp / name / "repo").mkdir(parents=True)
+        (self.tmp / name / "task.json").write_text(
+            json.dumps({"task_id": name, "prompt": prompt}), encoding="utf-8"
+        )
+
+    def test_a_failing_task_is_recorded_and_the_rest_still_run(self):
+        self._task("good")
+        missing = self.tmp / "not-a-task"  # no task.json — load_task will raise
+
+        llm = FakeChatModel(replies=[assistant_text("nothing to do"), assistant_text("nor here")])
+        with redirect_stdout(io.StringIO()):
+            results = evaluate([missing, self.tmp / "good"], llm=llm, max_steps=1)
+
+        self.assertEqual([r.task_id for r in results], ["not-a-task", "good"])
+        self.assertFalse(results[0].solved)
+        self.assertEqual(results[0].trace[0].kind, "error", "the reason is kept, not swallowed")
+
+    def test_the_crash_row_names_the_exception(self):
+        row = crashed(Path("/tasks/17-broken"), RuntimeError("model went away"))
+        self.assertEqual(row.task_id, "17-broken")
+        self.assertFalse(row.solved)
+        self.assertIn("model went away", row.trace[0].detail)
+        self.assertIn("RuntimeError", row.trace[0].name)
 
 
 class TestEvalReport(unittest.TestCase):

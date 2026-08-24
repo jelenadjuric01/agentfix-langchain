@@ -16,12 +16,7 @@ from agentfix.agent.graph import MAX_STEPS, AgentResult, run_agent
 from agentfix.agent.trace import Tracer
 from agentfix.sandbox.base import get_backend
 from agentfix.tasks.loader import load_task, workspace
-from agentfix.tools.fs import (
-    ListFilesTool,
-    ReadFileTool,
-    WriteFileTool,
-    relative_files,
-)
+from agentfix.tools.fs import ListFilesTool, ReadFileTool, WriteFileTool, relative_files
 from agentfix.tools.tests_tool import RunTestsTool
 
 
@@ -52,21 +47,22 @@ def solve_task(
 
     # Every run gets a disposable copy, and it is deleted when this block exits by any route.
     with workspace(task) as work_dir:
-        # Built first because WriteFileTool needs its `invalidate` method below.
-        run_tests = RunTestsTool(
-            root=work_dir, command=task.test_command, backend=get_backend(), timeout_s=30
-        )
-
         # Each tool is constructed with `work_dir` bound to it. That is why the graph's nodes
         # need no workspace argument: by this point the workspace is baked into the tools.
+        #
+        # A flat list with no wiring between the entries, which is newer than it looks. The
+        # tools used to be ordered — run_tests built first so that WriteFileTool could be
+        # handed its `invalidate` method — and run_tests then passed to the graph a second
+        # time so the stop condition could read it. Both went away when the tools started
+        # reporting what they did as ToolMessage artifacts: run_tests returns its ExecResult,
+        # write_file returns a WorkspaceChanged, and the graph folds the two into its state.
         tools = [
             ListFilesTool(root=work_dir),
             ReadFileTool(root=work_dir),
-            # a write makes the last test result stale, so `is_done` must not trust it
-            WriteFileTool(root=work_dir, allowed=writable, on_write=run_tests.invalidate),
-            run_tests,
+            WriteFileTool(root=work_dir, allowed=writable),
+            RunTestsTool(
+                root=work_dir, command=task.test_command, backend=get_backend(), timeout_s=30
+            ),
         ]
 
-        # `run_tests` is passed twice over: once inside `tools`, for the model to call, and
-        # once directly, so `is_done` can consult it without asking the model.
-        return run_agent(task, llm, tools, run_tests, max_steps=max_steps, tracer=Tracer(verbose))
+        return run_agent(task, llm, tools, max_steps=max_steps, tracer=Tracer(verbose))
