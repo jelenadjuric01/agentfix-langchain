@@ -244,7 +244,8 @@ behind it. Needs `--extra prebuilt`.
   so the nodes contain no tracing code at all.
 - Checkpointing: `InMemorySaver` snapshots the state after every node, which makes a run resumable
   and its history inspectable step by step.
-- `ChatOllama` parses tool calls, token usage and malformed arguments.
+- `ChatOllama` parses tool calls and token usage. Note what it does *not* do: malformed
+  tool arguments are not rescued into a reply you can answer — they raise.
 
 ## What it did not
 

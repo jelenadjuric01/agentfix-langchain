@@ -172,9 +172,8 @@ class Tracer(BaseCallbackHandler):
     def note(self, kind: str, name: str, detail: str) -> None:
         """Record something the graph decided rather than something the framework ran.
 
-        Two callers, both cases where no tool executed and so no callback fired: a call the
-        loop guard refused, and a tool call whose arguments were not valid JSON. Latency is
-        0.0 because nothing happened — that is the point.
+        The caller is the case where no tool executed and so no callback fired: a call the
+        loop guard refused. Latency is 0.0 because nothing happened — that is the point.
         """
         self.record(TraceEvent(self.step, kind, name, detail, self.turn_prompt_tokens, 0.0))
 
