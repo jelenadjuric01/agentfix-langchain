@@ -2,8 +2,9 @@
 
 The only file in the project that performs network I/O. It is one function, because the
 framework's job is exactly this: the client speaks Ollama's protocol, parses tool calls into
-`AIMessage.tool_calls`, records token usage in `usage_metadata`, and puts unparseable
-arguments in `invalid_tool_calls`. The no-framework edition hand-wrote all of that.
+`AIMessage.tool_calls` and records token usage in `usage_metadata`. The no-framework edition
+hand-wrote all of that. What it does NOT do is rescue unparseable tool arguments: those raise
+out of the model call.
 
 `ChatOllama` rather than `ChatOpenAI`, and the history is worth knowing because it is the
 sharpest lesson in the project about using a framework's *right* integration.

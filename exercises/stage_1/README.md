@@ -11,8 +11,7 @@ Three rules. The order they are checked in matters as much as the rules themselv
 
 1. **The model asked for tools.** Go to `"tools"`. Always — even if the tests already pass.
    A turn where the model still wants to act is not a turn on which to ask whether it has
-   finished. Note that a call whose JSON arguments did not parse still counts as asking:
-   `message.invalid_tool_calls` is as much a request as `message.tool_calls`.
+   finished.
 
 2. **The model replied with prose and the tests pass.** Return `END`. This is the successful
    exit, and the only one.

@@ -81,24 +81,6 @@ class TestToolCallsAlwaysRun(Stage1TestCase):
         self.assertEqual((self.tmp / "cart.py").read_text(), FIXED)
         self.assertEqual(llm.index, 5, "the graph took exactly the scripted turns")
 
-    def test_a_call_whose_json_did_not_parse_still_counts_as_asking(self):
-        """`invalid_tool_calls` is a request too. Routing on tool_calls alone ends the run here,
-        leaving the model's call unanswered — and the API rejects the next request when it is."""
-        from agentfix.llm.fake import assistant_invalid_tool_call
-
-        _, llm = self.run_with(
-            [
-                assistant_invalid_tool_call("read_file", '{"path": "cart.py"'),
-                assistant_text("giving up"),
-            ],
-            max_steps=2,
-        )
-        self.assertEqual(llm.index, 2, "the run must not end on a malformed call")
-        answers = [m for m in llm.calls[-1] if getattr(m, "tool_call_id", None)]
-        self.assertEqual(len(answers), 1, "every call the model made needs exactly one reply")
-
-
-class TestTheOnlySuccessfulExit(Stage1TestCase):
     def test_the_run_ends_when_the_tests_pass(self):
         """Rule 2."""
         result, _ = self.run_with(

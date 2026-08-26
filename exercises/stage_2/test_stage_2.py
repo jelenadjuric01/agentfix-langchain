@@ -12,7 +12,6 @@ from agentfix.agent.graph import MAX_GUARD_HITS, call_signature, run_agent
 from agentfix.agent.trace import Tracer
 from agentfix.llm.fake import (
     FakeChatModel,
-    assistant_invalid_tool_call,
     assistant_text,
     assistant_tool_call,
 )
@@ -190,20 +189,6 @@ class TestTheGuard(Stage2TestCase):
             llm.index, MAX_GUARD_HITS + 1, "the run should have been given up on, not run out"
         )
 
-    def test_repeated_malformed_json_also_trips_the_guard(self):
-        """A model stuck on one broken call is just as stuck as one stuck on a good call."""
-        result, llm = self.run_with(
-            [
-                assistant_invalid_tool_call("read_file", '{"path": ', call_id=f"c{i}")
-                for i in range(10)
-            ],
-            max_steps=10,
-        )
-        self.assertFalse(result.solved)
-        self.assertLessEqual(llm.index, MAX_GUARD_HITS + 1)
-
-
-class TestTheAgentStillWorks(Stage2TestCase):
     def test_a_normal_run_is_untouched_by_the_guard(self):
         """The guard must be invisible to an agent that is making progress."""
         fixed = "def total(prices):\n    return sum(prices)\n"

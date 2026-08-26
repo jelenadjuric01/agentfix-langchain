@@ -88,29 +88,6 @@ def assistant_tool_calls(
     )
 
 
-def assistant_invalid_tool_call(
-    name: str, raw_arguments: str, call_id: str = "call_1", prompt_tokens: int = 10
-) -> AIMessage:
-    """A reply whose tool-call arguments are not valid JSON.
-
-    Worth having a builder for, because `ToolNode` ignores these completely: without the
-    graph's own handling, the model would receive no answer to a call it made, and the next
-    request would be rejected by the API.
-    """
-    return AIMessage(
-        content="",
-        invalid_tool_calls=[
-            {
-                "name": name,
-                "args": raw_arguments,
-                "id": call_id,
-                "error": "Function arguments are not valid JSON.",
-            }
-        ],
-        usage_metadata=_usage(prompt_tokens, 5),
-    )
-
-
 class FakeChatModel(BaseChatModel):
     """Scripted client so the agent graph is testable with no model running."""
 

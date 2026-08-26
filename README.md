@@ -251,11 +251,11 @@ behind it. Needs `--extra prebuilt`.
 - **`handle_tool_errors` defaults to letting a tool's exception kill the run.** You have to opt
   back in — and passing a *string* rather than `True` silently discards the specific error, so the
   model stops being told which argument it forgot.
-- **`invalid_tool_calls` are ignored entirely.** A tool call whose JSON did not parse gets no reply
-  message at all, and the API requires an answer to every call. A 12B model gets that JSON wrong
-  often enough for this to matter.
 - **The loop guard.** LangGraph has no hook for it. LangChain 1.x gives you the seam
-  (`wrap_tool_call`) but not the policy — which is Stage 2 of the workshop.
+  (`wrap_tool_call`) but not the policy — which is Stage 2 of the workshop. It also leaves you
+  the invariant the guard has to respect: every tool call needs exactly one reply, keyed by
+  `tool_call_id`, so even a call you REFUSE to run still has to be answered. Skip one and the
+  *next* request is rejected, a turn away from the code that caused it.
 - **The step budget — on LangGraph.** `recursion_limit` counts node executions, not model turns.
   On LangChain 1.x this one has *moved*: `ModelCallLimitMiddleware(run_limit=N)` counts exactly
   what `AgentState.step` counts. See `agent/prebuilt.py`, including the measurement showing it is

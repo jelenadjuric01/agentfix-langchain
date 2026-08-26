@@ -55,11 +55,8 @@ def describe(message: AIMessage) -> str:
     able to answer "does this agent reason?" — measured answer, on Mellum2: no, it does not.
     """
     text = (message.text or "").strip()
-    if message.tool_calls or message.invalid_tool_calls:
-        # `or "unknown"`: an invalid tool call may not even have a parseable name.
-        names = ", ".join(
-            call["name"] or "unknown" for call in [*message.tool_calls, *message.invalid_tool_calls]
-        )
+    if message.tool_calls:
+        names = ", ".join(call["name"] or "unknown" for call in message.tool_calls)
         return f"calls {names}" + (f" -- {text}" if text else " -- (NO REASONING)")
     return text
 
