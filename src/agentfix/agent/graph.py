@@ -171,12 +171,10 @@ def tests_passed_after(replies: Sequence[AnyMessage], current: bool) -> bool:
 def call_signature(call: dict[str, Any]) -> str:
     """An identity for "the same call again": tool name plus its arguments.
 
-    Two calls the guard should treat as identical must produce the same string here. The
-    placeholder below runs, so the agent works — it is just wrong in two ways the tests name.
-
-    EXERCISE(stage-2): see exercises/stage_2/README.md
+    `sorted(...)` first so that {"a": 1, "b": 2} and {"b": 2, "a": 1} compare equal — key order
+    in the model's JSON is not meaningful.
     """
-    return repr(call)
+    return f"{call['name']}::{sorted((call.get('args') or {}).items())!r}"
 
 
 def requested_calls(message: AIMessage) -> list[tuple[dict[str, Any], str]]:

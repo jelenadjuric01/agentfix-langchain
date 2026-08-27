@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 import unittest
 
-from agentfix.agent.graph import MAX_GUARD_HITS, call_signature, run_agent
+from agentfix.agent.graph import MAX_GUARD_HITS, run_agent
 from agentfix.agent.trace import Tracer
 from agentfix.llm.fake import (
     FakeChatModel,
@@ -28,40 +28,6 @@ SUITE = (
     "    def test_total(self):\n"
     "        self.assertEqual(total([1, 2]), 3)\n"
 )
-
-
-class TestCallSignature(unittest.TestCase):
-    """The identity function. One line, and one trap."""
-
-    def test_the_same_call_twice_has_the_same_signature(self):
-        call = {"name": "read_file", "args": {"path": "cart.py"}, "id": "c1"}
-        other = {"name": "read_file", "args": {"path": "cart.py"}, "id": "c2"}
-        self.assertEqual(call_signature(call), call_signature(other))
-        self.assertNotIn("c1", call_signature(call), "the id must not be part of the identity")
-
-    def test_different_arguments_are_a_different_call(self):
-        a = {"name": "read_file", "args": {"path": "cart.py"}, "id": "c1"}
-        b = {"name": "read_file", "args": {"path": "other.py"}, "id": "c2"}
-        self.assertNotEqual(call_signature(a), call_signature(b))
-
-    def test_a_different_tool_is_a_different_call(self):
-        a = {"name": "read_file", "args": {}, "id": "c1"}
-        b = {"name": "list_files", "args": {}, "id": "c2"}
-        self.assertNotEqual(call_signature(a), call_signature(b))
-
-    def test_key_order_does_not_change_the_signature(self):
-        """The trap. JSON object key order is not meaningful, and a model will reorder keys.
-
-        A signature built by stringifying the dict as-is lets a stuck model walk straight past
-        the guard by shuffling its arguments.
-        """
-        a = {"name": "write_file", "args": {"path": "a.py", "content": "x = 1\n"}, "id": "c1"}
-        b = {"name": "write_file", "args": {"content": "x = 1\n", "path": "a.py"}, "id": "c2"}
-        self.assertEqual(call_signature(a), call_signature(b))
-
-    def test_a_call_with_no_arguments_works(self):
-        """run_tests and list_files take none, so this must not raise."""
-        self.assertTrue(call_signature({"name": "run_tests", "args": {}, "id": "c1"}))
 
 
 class Stage2TestCase(TempDirTestCase):

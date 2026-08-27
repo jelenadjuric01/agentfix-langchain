@@ -1,18 +1,16 @@
 # Stage 2 — Catching a stuck model
 
-Open `src/agentfix/agent/graph.py`. Two `EXERCISE(stage-2)` markers, both small:
-
-1. **`call_signature`** — an identity for "the same call again".
-2. **the guard block in `tools_node`** — the decision to refuse a call instead of running it.
+Open `src/agentfix/agent/graph.py` and find `EXERCISE(stage-2)` in `tools_node`: the guard block,
+the decision to refuse a call instead of running it.
 
 ## What to write
 
-**`call_signature(call)`** returns a string that is equal for two calls the model should not be
-allowed to repeat: the tool name plus its arguments. One line.
-
-The catch: `{"path": "a.py", "content": "x"}` and `{"content": "x", "path": "a.py"}` are the
-same call. Key order in the model's JSON is not meaningful, and a signature that treats them as
-different is a guard that a model can walk straight past. There is a test for exactly this.
+The identity of a call is already written for you. `call_signature(call)` returns a string that is
+equal for two calls the model should not be allowed to repeat — the tool name plus its arguments,
+with the keys sorted so that `{"path": "a.py", "content": "x"}` and
+`{"content": "x", "path": "a.py"}` come out the same. Key order in the model's JSON is not
+meaningful, and a signature that treated them as different would be a guard a model can walk
+straight past.
 
 **The guard block** sits inside the loop over `requested_calls(message)`. For each call you have
 `current` (this call's signature), `signature` (the previous executed call's), and `hits` (how
@@ -24,7 +22,7 @@ many times it has repeated). You decide:
 - Otherwise → this is progress. Reset the count and remember this signature as the new
   baseline, then let the call through to be executed.
 
-`guard_observation` is written for you, including the escalation on the second repeat.
+`guard_observation` is written for you too, including the escalation on the second repeat.
 
 ## The rule you must not break
 
