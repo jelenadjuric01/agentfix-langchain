@@ -6,11 +6,23 @@ actually works, by having them build the two decisions that matter. You write `r
 which has stopped learning. Then you watch it fix real bugs, locally, for $0, using [JetBrains
 Mellum2](https://huggingface.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF) served by Ollama.
 
-This is the **framework** edition, built on LangGraph. A sibling repository builds the same agent
-with no framework at all, and the interesting content is not "how to use LangGraph" — it is which
-parts of a hand-written agent a framework absorbs, which parts it leaves you holding, and which
-parts it quietly breaks if you are not watching. See [What the framework gave
-us](#what-the-framework-gave-us).
+This is the **framework** edition, built on LangGraph. Three repositories build the same agent,
+and the interesting content is not "how to use LangGraph" — it is which parts of a hand-written
+agent a framework absorbs, which parts it leaves you holding, and which parts it quietly breaks if
+you are not watching. See [What the framework gave us](#what-the-framework-gave-us).
+
+| | framework | reasoning |
+|---|---|---|
+| `agentfix-workshop` | none — a hand-written `for` loop | no |
+| **`agentfix-langchain`** (this one) | LangGraph | no |
+| `agentfix-react` | LangGraph | **yes** |
+
+All three are also packaged as a single JetBrains Academy course,
+`Simple-Python-Fixing-Agent-Framework`, where they become four lessons in one IDE project. The
+course runs everything through a `run.py` at the course root instead of `uv run`, and its lessons
+name the packages `agentfix` / `agentlang` / `agentgraph` so all three can live side by side. This
+repository is the standalone version: same agent, same exercises, `uv` and git branches instead of
+the plugin.
 
 > **You are on `main`, the exercise branch.** Two functions in
 > `src/agentfix/agent/graph.py` are deliberately unwritten, so the exercise tests fail and
@@ -295,7 +307,7 @@ the model a stable name, but it is no longer the only way to get a working conte
 
 ## Measured performance
 
-Option 1, macOS, 24 GB RAM, 37 tok/s:
+Option 1, macOS, 24 GB RAM, 37 tok/s. The workshop suite:
 
 ```
 task                     solved   steps   tokens    peak ctx   seconds
@@ -304,6 +316,22 @@ task                     solved   steps   tokens    peak ctx   seconds
 03-parser                True     7       8322      1461       48.32
 pass@1 = 1.00  (3 task(s))  peak prompt = 1574 tok
 ```
+
+Three tasks the agent is expected to pass is a smoke test, not a measurement — it tells you your
+wiring works. The 20-task vendored HumanEvalFix subset is the measurement, and it is the one worth
+quoting (`results/humanevalfix.json`):
+
+| | HumanEvalFix, 20 tasks |
+|---|---|
+| pass@1 | 0.45 (9/20) |
+| steps | median 10, max 10 |
+| tokens | 237,651 |
+| wall clock | 8m15s |
+| peak prompt | 3,929 tok |
+
+The median step count is the budget cap. More than half the runs did not finish — they were
+stopped — and all 11 failures spent all ten steps. That is the shape of an Act-only agent on
+anything harder than the workshop tasks: it tries things until the budget runs out.
 
 Eval is deliberately sequential, and that is measured rather than assumed: against this Ollama
 server, three requests took 1.7s run one after another and 2.8s run concurrently. One local model
@@ -323,6 +351,16 @@ The port is meant to change the code and not the agent. Same task, same model:
 
 Same tool sequence, step for step. The wire format is no longer byte-identical — that is the
 deliberate trade described under **What it did not**.
+
+**One task is not parity, and the 20-task benchmark does not show it.** On the same HumanEvalFix
+subset, same model, same 10-step budget, the no-framework edition scored **0.60 (12/20)** on
+185,235 tokens with a median of 7 steps; this one scores 0.45 on 237,651 tokens with a median of
+10. Before reading that as a cost of the framework, note three things: `temperature` is 0.6, so a
+single 20-task run at one attempt per task is a noisy statistic; the two editions take *identical*
+step counts (8, 8, 7) on the tasks they both solve; and in the no-framework edition, making the
+stop condition real moved pass@1 from 0.50 to 0.60 on its own — larger than the gap here. What
+moves this number is the prompt, the budget and the stop condition, not the plumbing. What actually
+moves it a lot is reasoning: see `agentfix-react`, which scores 0.80 on the same 20 tasks.
 
 **The agent does not reason.** Seven tool-calling turns, seven `(NO REASONING)` markers, and the
 only prose arrives at step 8 *after* the fix is already verified. It also reads all three source
@@ -366,3 +404,7 @@ what keeps them runnable everywhere.
 - Nothing stops the agent from writing code that special-cases the test inputs. The write
   allow-list and the protected test suite close the routes that were actually reproduced; that one
   stays open.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
