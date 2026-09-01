@@ -319,7 +319,7 @@ pass@1 = 1.00  (3 task(s))  peak prompt = 1574 tok
 
 Three tasks the agent is expected to pass is a smoke test, not a measurement — it tells you your
 wiring works. The 20-task vendored HumanEvalFix subset is the measurement, and it is the one worth
-quoting (`results/humanevalfix.json`):
+quoting (`results/precomputed/humanevalfix.json`):
 
 | | HumanEvalFix, 20 tasks |
 |---|---|
