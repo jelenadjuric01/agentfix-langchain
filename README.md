@@ -187,6 +187,9 @@ a misconfiguration. A healthy Option 1 machine reports:
 READY
 ```
 
+Anything that fails there, and everything else that has gone wrong for someone setting
+this up, is in [TROUBLESHOOT.md](TROUBLESHOOT.md).
+
 ## Build the agent
 
 Two stages, both offline, both editing `src/agentfix/agent/graph.py`:
@@ -404,6 +407,12 @@ what keeps them runnable everywhere.
 - Nothing stops the agent from writing code that special-cases the test inputs. The write
   allow-list and the protected test suite close the routes that were actually reproduced; that one
   stays open.
+
+## Cleaning up
+
+The model is ~8 GB and Ollama keeps it after the workshop ends. Removing everything this
+repository put on your machine — models, Ollama, `uv`, the Docker image, the clone — is
+[CLEANUP.md](CLEANUP.md), per operating system.
 
 ## License
 
