@@ -214,7 +214,7 @@ def completion_tokens_of(message: AIMessage) -> int:
 def build_graph(
     llm: BaseChatModel,
     tools: Sequence[BaseTool],
-    tracer: Tracer,  # noqa: ARG001 — used once you fill in stage 2
+    tracer: Tracer,
     max_steps: int = MAX_STEPS,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> Any:
@@ -284,20 +284,26 @@ def build_graph(
         hits = state["guard_hits"]
 
         for call, current in requested_calls(message):
-            name = str(call.get("name") or "unknown")  # noqa: F841 — used once you fill this in
+            name = str(call.get("name") or "unknown")
 
-            # The loop guard. `current` is this call's signature, `signature` the previous
-            # executed call's, `hits` the number of consecutive repeats. Decide whether this
-            # call runs at all — and answer it either way.
-            #
-            # `guard_observation(name, hits)` writes the text for a refusal, and
-            # `tracer.note("tool", name, ...)` records something the graph decided rather than
-            # something a tool did.
-            #
-            # Right now there is no guard at all: every call runs, however many times the model
-            # asks for it.
-            #
-            # EXERCISE(stage-2): see exercises/stage_2/README.md
+            # Loop guard. A model that repeats a call verbatim learned nothing from the result,
+            # so re-running it would burn a step for the same output. Send an observation
+            # instead and let it try something else.
+            if current == signature:
+                hits += 1
+                replies.append(
+                    ToolMessage(
+                        content=guard_observation(name, hits),
+                        tool_call_id=call["id"],
+                        name=name,
+                    )
+                )
+                tracer.note("tool", name, f"guarded — identical call #{hits + 1} in a row")
+                continue
+
+            # Progress: reset the counter and remember this call as the new baseline.
+            hits = 0
+            signature = current
 
             runnable.append(call)
 
