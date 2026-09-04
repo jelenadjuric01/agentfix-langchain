@@ -37,7 +37,7 @@ Ollama setup working. Real inference is the reward, not a prerequisite.
 | Option | Who | RAM | Model |
 |---|---|---|---|
 | 1 (default) | 16 GB+ laptop | 16 GB+ | Mellum2 12B via Ollama (~8 GB download) |
-| 2 | weaker laptop | ~4 GB | `qwen2.5-coder:1.5b` (~1 GB) |
+| 2 | weaker laptop | ~4 GB | `qwen3:1.7b` (~1.4 GB) |
 | 3 | browser only | any | Google Colab — `notebooks/agentfix.ipynb` |
 
 Options 1 and 2 run on macOS, Linux, WSL2 and native Windows; per-OS commands are in the setup
@@ -139,27 +139,26 @@ window](#the-context-window).
 </details>
 
 <details>
-<summary><b>Option 2 — the 1 GB fallback</b></summary>
+<summary><b>Option 2 — the 1.4 GB fallback</b></summary>
 
 ```bash
-ollama pull qwen2.5-coder:1.5b
-export MELLUM_MODEL=qwen2.5-coder:1.5b     # PowerShell: $env:MELLUM_MODEL="qwen2.5-coder:1.5b"
+ollama pull qwen3:1.7b
+export MELLUM_MODEL=qwen3:1.7b     # PowerShell: $env:MELLUM_MODEL="qwen3:1.7b"
 ```
 
 No `ollama create` step: the client sends `num_ctx` with every request and Ollama's native API
 honours it, so a plain pull is enough. Set `MELLUM_MODEL` in every shell you use, or put it in
 your shell profile.
 
-A 1.5B model fixes fewer bugs than Mellum2 and gets its tool-call JSON wrong more often. That is
-not a broken setup — it is the reason the loop guard in Stage 2 exists. Untested by the author;
-the exercises do not depend on it.
+It is a much smaller model than Mellum2 and may not do as well; a run that ends `NOT SOLVED` is
+not a broken setup. The exercises do not depend on it.
 </details>
 
 <details>
 <summary><b>Option 3 — Google Colab</b></summary>
 
 Open `notebooks/agentfix.ipynb` in Colab and run the cells in order. It installs Ollama, pulls
-`qwen2.5-coder:1.5b`, clones this repo at `main`, disables pushing, and runs each stage's tests
+`qwen3:1.7b`, clones this repo at `main`, disables pushing, and runs each stage's tests
 from a cell. Everything else in this README applies, except that you edit files and run checks in
 notebook cells rather than in an IDE.
 </details>

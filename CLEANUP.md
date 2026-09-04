@@ -16,7 +16,7 @@ notebook copy from your Drive if Colab saved one there, and you are done.
 | What | Created by | Where it lives | Size |
 |---|---|---|---|
 | `agentfix-mellum2` + its base model | Option 1 | Ollama's model store | ~8 GB |
-| `qwen2.5-coder:1.5b` | Option 2 | Ollama's model store | ~1 GB |
+| `qwen3:1.7b` | Option 2 | Ollama's model store | ~1.4 GB |
 | `MELLUM_MODEL` in your shell profile | Option 2, only if you put it there | `~/.zshrc`, `~/.bashrc`, or the Windows user environment | — |
 | `.venv` and `uv.lock`-resolved packages | `uv sync` | inside the clone | a few hundred MB |
 | uv's package cache | `uv sync` | `~/.cache/uv` (`%LOCALAPPDATA%\uv` on Windows) | up to a few hundred MB |
@@ -52,7 +52,7 @@ ollama rm agentfix-mellum2 hf.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_
 
 ```bash
 # Option 2
-ollama rm qwen2.5-coder:1.5b
+ollama rm qwen3:1.7b
 ```
 
 Remove the derived model **and** the base model it was built from. The base model is the
@@ -142,7 +142,7 @@ ollama rm agentfix-mellum2 hf.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_
 
 ```bash
 # Option 2
-ollama rm qwen2.5-coder:1.5b
+ollama rm qwen3:1.7b
 ```
 
 Remove the derived model **and** the base model it was built from — the base model is the
@@ -249,7 +249,7 @@ ollama rm agentfix-mellum2 hf.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_
 
 ```powershell
 # Option 2
-ollama rm qwen2.5-coder:1.5b
+ollama rm qwen3:1.7b
 ```
 
 Remove the derived model **and** the base model it was built from.

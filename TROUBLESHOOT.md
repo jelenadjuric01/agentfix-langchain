@@ -110,7 +110,7 @@ echo $env:MELLUM_MODEL
 ollama --version
 ```
 
-`$env:MELLUM_MODEL="qwen2.5-coder:1.5b"` sets it for the current window only, which is the fastest
+`$env:MELLUM_MODEL="qwen3:1.7b"` sets it for the current window only, which is the fastest
 way to prove the model is fine.
 </details>
 
@@ -158,8 +158,8 @@ somewhere in between. A pull that died leaves a partial blob behind, and **re-ru
 If the space is genuinely not there, take Option 2 from the README, which needs about 1 GB:
 
 ```bash
-ollama pull qwen2.5-coder:1.5b
-export MELLUM_MODEL=qwen2.5-coder:1.5b     # PowerShell: $env:MELLUM_MODEL="qwen2.5-coder:1.5b"
+ollama pull qwen3:1.7b
+export MELLUM_MODEL=qwen3:1.7b     # PowerShell: $env:MELLUM_MODEL="qwen3:1.7b"
 ```
 </details>
 
@@ -183,7 +183,7 @@ ollama create agentfix-mellum2 -f Modelfile
 ```
 
 On Option 2 there is no `create` step, so `MELLUM_MODEL` has to name the pulled model exactly —
-including the `:1.5b` tag.
+including the `:1.7b` tag.
 </details>
 
 <details>
@@ -226,10 +226,9 @@ both at once.
 <summary><b>The model is painfully slow, or the machine runs out of memory</b></summary>
 
 Mellum2 is an 8 GB model and wants 16 GB of RAM to be comfortable. Take Option 2 from the README:
-`qwen2.5-coder:1.5b`, about 1 GB. It fixes fewer bugs and gets its tool-call JSON wrong more
-often — which is not a broken setup, it is what a 1.5B model does. Note that this edition has no
-recovery path for malformed tool-call JSON: it surfaces as an `error:` line from `solve`, not as a
-guarded turn.
+`qwen3:1.7b`, about 1.4 GB. It is a much smaller model than Mellum2 and may not do as well. Note
+that this edition has no recovery path for malformed tool-call JSON: it surfaces as an `error:`
+line from `solve`, not as a guarded turn.
 
 Inside WSL2, check `free -g` before blaming the machine: WSL2 takes a fraction of your RAM by
 default (50%, capped at 8 GB on older builds), and that fraction is what has to hold the model.
@@ -288,9 +287,9 @@ git checkout solutions           # the finished agent, if you would rather read 
 <details>
 <summary><b>The agent prints <code>NOT SOLVED</code></b></summary>
 
-Not necessarily your bug. Real models do not fix every task, and `qwen2.5-coder:1.5b` is
-noticeably less reliable at multi-step tool use than Mellum2 — including getting its tool-call JSON
-wrong, which this edition reports as an `error:` line rather than recovering from.
+Not necessarily your bug. Real models do not fix every task, and the Option 2 model
+(`qwen3:1.7b`) is much smaller than Mellum2 and may not do as well. If it gets its tool-call JSON
+wrong, this edition reports that as an `error:` line rather than recovering from it.
 
 Read the `--verbose` trace before assuming your code is wrong. You are looking for the shape of a
 working loop: the model calls `run_tests`, looks around with `list_files` / `read_file`, writes a

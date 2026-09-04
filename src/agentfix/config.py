@@ -45,7 +45,12 @@ class LLMConfig:
     # Cap on ONE reply. Relevant because write_file must emit a complete file: this is the
     # ceiling on how large a file the agent can rewrite in a single turn. Reaches the server as
     # Ollama's `num_predict`.
-    max_tokens: int = 1024
+    #
+    # It also has to cover the Option 2 model's reasoning: qwen3 thinks before it acts, and those
+    # tokens count against this cap even though this edition does not display them. At 1024 the
+    # reply was truncated mid-thought and the tool call at the end of it was lost, which shows up
+    # as a turn that asks for nothing at all.
+    max_tokens: int = 4096
 
     # The context window the model is loaded with. Honoured now that the client speaks Ollama's
     # native API, which is why `agentfix doctor` can check it and expect to be obeyed.
