@@ -261,8 +261,11 @@ behind it. Needs `--extra prebuilt`.
 - **`handle_tool_errors` defaults to letting a tool's exception kill the run.** You have to opt
   back in — and passing a *string* rather than `True` silently discards the specific error, so the
   model stops being told which argument it forgot.
-- **The loop guard.** LangGraph has no hook for it. LangChain 1.x gives you the seam
-  (`wrap_tool_call`) but not the policy — which is Stage 2 of the workshop. It also leaves you
+- **The loop guard.** The seams exist — `wrap_tool_call` in LangChain 1.x middleware, and a
+  `post_model_hook` if you build the agent with `create_react_agent` — but a seam is only a place
+  to put a decision, and the state behind it is the framework's: `agent/prebuilt.py` builds this
+  guard on `wrap_tool_call`, and its counters survive no checkpoint and leak into the next run.
+  Writing the policy is Stage 2 of the workshop. It also leaves you
   the invariant the guard has to respect: every tool call needs exactly one reply, keyed by
   `tool_call_id`, so even a call you REFUSE to run still has to be answered. Skip one and the
   *next* request is rejected, a turn away from the code that caused it.
