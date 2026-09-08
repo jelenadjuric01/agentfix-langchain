@@ -2,14 +2,15 @@
 
 Open `src/agentfix/agent/graph.py` and find `EXERCISE(stage-1)` in `route_after_agent`.
 
-This function runs after every model turn and returns one of three destinations: `"tools"`,
+This function runs after every model turn and returns one of three destinations: `"guard"`,
 `"nudge"`, or `END`. It is the only place in the whole graph where a run can end *successfully*.
 
 ## What to write
 
 Three rules. The order they are checked in matters as much as the rules themselves.
 
-1. **The model asked for tools.** Go to `"tools"`. Always — even if the tests already pass.
+1. **The model asked for tools.** Go to `"guard"` — the tool step, which screens the calls
+   before any of them runs. Always — even if the tests already pass.
    A turn where the model still wants to act is not a turn on which to ask whether it has
    finished.
 
