@@ -24,11 +24,6 @@ name the packages `agentfix` / `agentlang` / `agentgraph` so all three can live 
 repository is the standalone version: same agent, same exercises, `uv` and git branches instead of
 the plugin.
 
-> **You are at `stage-1-solution`.** Stage 1 is written for you; the stage-2 guard in
-> `src/agentfix/agent/graph.py` is still unwritten, so its exercise tests fail and
-> `agentfix solve` stops with a pointer to `exercises/README.md`. That is the intended starting
-> point. For the finished agent: `git checkout solutions`.
-
 Every exercise test runs against a scripted fake model, so the workshop does not depend on your
 Ollama setup working. Real inference is the reward, not a prerequisite.
 

@@ -316,27 +316,26 @@ def build_graph(
         hits = state["guard_hits"]
 
         for call, current in requested_calls(message):
-            name = str(call.get("name") or "unknown")  # noqa: F841 — used once you fill this in
+            name = str(call.get("name") or "unknown")
 
-            # The loop guard. `current` is this call's signature, `signature` the previous
-            # dispatched call's, `hits` the number of consecutive repeats. Decide whether this
-            # call runs at all — and answer it either way.
-            #
-            # Refusing IS answering, which is the part to understand before you write anything:
-            # `route_after_guard` below dispatches exactly the calls that have no reply yet, so
-            # a call you append to `replies` here is a call that never executes. Nothing has to
-            # record which calls survived, and no message has to restate them.
-            #
-            # `guard_observation(name, hits)` writes the text for a refusal, and
-            # `tracer.note("tool", name, ...)` records something the graph decided rather than
-            # something a tool did. `hits` and `signature` are returned below, so whatever you
-            # leave in them is what the next turn compares against.
-            #
-            # Right now there is no guard at all: nothing is answered here, so every call the
-            # model asks for is dispatched, however many times it asks for it.
-            #
-            # EXERCISE(stage-2): see exercises/stage_2/README.md
-            pass
+            if current == signature:
+                hits += 1
+                replies.append(
+                    ToolMessage(
+                        content=guard_observation(name, hits),
+                        tool_call_id=call["id"],
+                        name=name,
+                    )
+                )
+                tracer.note("tool", name, f"guarded — identical call #{hits + 1} in a row")
+                continue
+
+            # Progress: reset the counter and remember this call as the new baseline. Note the
+            # baseline advances for a call that is merely DISPATCHED, not one known to have
+            # succeeded — same as before, and deliberate: a call that ran and failed is still
+            # new information, and repeating it verbatim is still the model going in circles.
+            hits = 0
+            signature = current
 
         return {"messages": replies, "last_signature": signature, "guard_hits": hits}
 
