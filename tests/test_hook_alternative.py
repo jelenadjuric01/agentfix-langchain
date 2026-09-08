@@ -1,19 +1,23 @@
-"""What it would cost to build the loop guard on the framework's own hook instead.
+"""The two LangGraph behaviours `agent/graph.py`'s shape depends on.
 
-`agent/graph.py` guards inside `tools_node` and hands the surviving calls to `ToolNode` in one
-batched invocation. LangGraph offers a different shape for the same job: `create_react_agent`
-takes a `post_model_hook`, and the router behind it (langgraph/prebuilt/chat_agent_executor.py)
-computes
+The agent borrows the framework's own shape for the guard: `create_react_agent` wires
+`post_model_hook` by computing
 
     pending = [c for c in last_ai_message.tool_calls if c["id"] not in answered_tool_call_ids]
 
-and `Send`s one task per pending call. Answer a call in the hook and it is simply not pending,
-so it never runs — the guard contract, supplied by the framework.
+and dispatching one task per pending call — so answering a call is what refuses it.
+`guard_node` and `route_after_guard` are that router, reproduced, because the hook itself is a
+`create_react_agent` argument while `Send` is public to anyone.
 
-That shape is reproducible in a hand-built graph: `Send` is public and the diff is four lines.
-So the question is not whether it is possible but what it costs, and these two tests are the
-answer. Neither asserts anything about OUR code; both pin down LangGraph behaviour that the
-choice depends on, which is why they live here rather than in a comment that could rot.
+These tests are why that shape has the two extra pieces it has. Neither asserts anything about
+our code; both pin down third-party behaviour the design rests on, which is the kind of claim
+that belongs in a test rather than a comment:
+
+  - `max_concurrency=1` throttles Send fan-out, so the oracle guarantee survives one task per
+    call — but only from the RUN config, which is why `guard_node` refuses to proceed without
+    it instead of trusting the caller.
+  - One task per call means several writers per superstep, and a reducer-free key refuses that
+    — which is why the verdict fold lives in `fold_node` and not with the guard.
 
 Run:  uv run python -m unittest tests.test_hook_alternative -v
 """
@@ -54,13 +58,14 @@ def _fan(state: Any) -> Any:
 class TestSendFanOutRespectsMaxConcurrency(unittest.TestCase):
     """The oracle guarantee survives the hook's shape. This one is good news.
 
-    `tools_node` pins `max_concurrency=1` on its single batched invocation because `ToolNode`
-    otherwise runs a turn's calls in a real thread pool — which can let `run_tests` measure the
-    workspace as it was before a `write_file` in the same turn, and that is a false SOLVED.
+`run_agent` sets `max_concurrency=1` on the run config, and `guard_node` refuses to
+    dispatch without it, because `ToolNode` otherwise runs a turn's calls in a real thread pool
+    — which can let `run_tests` measure the workspace as it was before a `write_file` in the
+    same turn, and that is a false SOLVED.
 
-    The obvious worry about the hook's shape is that one task per call puts the calls in
-    different supersteps' tasks, outside the reach of that one config. It does not:
-    `max_concurrency` throttles the fan-out too.
+    The worry worth settling was whether one task per call escapes that config entirely. It
+    does not: `max_concurrency` throttles the fan-out too, which is what makes the whole shape
+    usable here.
     """
 
     def _run(self, config: dict[str, Any]) -> tuple[int, list[str]]:
@@ -103,19 +108,18 @@ class TestSendFanOutRespectsMaxConcurrency(unittest.TestCase):
 class TestFanOutBreaksAReducerFreeKey(unittest.TestCase):
     """And this is the bill. One task per call makes the tool step a CONCURRENT writer.
 
-    `tools_node` folds the verdict itself, in the same return as the tool replies, because it is
-    the single writer of `tests_passed`. Fan the calls out and each task wants to write that key
-    in one superstep, which LangGraph refuses for any key without a reducer.
+Fan the calls out and each task wants to write `tests_passed` in one superstep, which
+    LangGraph refuses for any key without a reducer. This is the whole reason `fold_node`
+    exists: the fold happens once, after the tool step, where it is a single writer again.
 
-    So adopting the hook's shape is not free: the verdict fold has to move to a node after the
-    tools, or `tests_passed` has to take a reducer — and state.py argues against the reducer on
-    its own merits. That is the trade, and it is the same cost as the synthetic AIMessage in
-    `tools_node` today, paid in the state schema instead of in a comment.
+    The alternative was a reducer on `tests_passed`, which state.py argues against on its own
+    merits — a reducer is handed (current, incoming) and cannot tell "the suite went green"
+    from "the workspace changed, so the verdict is void".
     """
 
     def _run(self, calls: list[str]) -> dict[str, Any]:
         def work(payload: dict[str, Any]) -> dict[str, Any]:
-            # As tools_node does today: reply, and fold the verdict in the same update.
+            # The shape `fold_node` exists to avoid: reply AND fold in one task.
             return {"log": [payload["name"]], "tests_passed": True}
 
         graph = StateGraph(VerdictState)

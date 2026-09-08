@@ -1,6 +1,6 @@
 # Stage 2 — Catching a stuck model
 
-Open `src/agentfix/agent/graph.py` and find `EXERCISE(stage-2)` in `tools_node`: the guard block,
+Open `src/agentfix/agent/graph.py` and find `EXERCISE(stage-2)` in `guard_node`: the guard block,
 the decision to refuse a call instead of running it.
 
 ## What to write
@@ -58,8 +58,9 @@ the state is.
 `post_model_hook` is the one worth answering properly, because it looks like a fit. Its router
 diffs the tool calls the model made against the `tool_call_id`s already answered and dispatches
 only what is left — so answering a call inside the hook is precisely what refuses it. That is the
-guard contract, handed to you, and it is tidier than the synthetic `AIMessage` `tools_node` builds
-today. Two things stand in the way, and only the second is interesting:
+guard contract, handed to you — and it is the shape this agent now uses, which is why there is no
+synthetic `AIMessage` anywhere in `graph.py`. Two things stood in the way, and only the second
+cost anything:
 
 1. It is a `create_react_agent` argument, not a `StateGraph` one, so you cannot pass it here. But
    the *shape* is reproducible in a hand-built graph in about four lines — `Send` is public.
@@ -72,9 +73,10 @@ Both halves are measured, so you can check rather than take it on faith:
     uv run python -m unittest tests.test_hook_alternative -v
 
 The same file also settles the obvious worry in the other direction: `max_concurrency=1` throttles
-the fan-out as well, so the oracle guarantee `tools_node` protects would survive the change. What
-would not survive is the single-writer verdict — the fold would have to move out of the guard's
-node, or the key would need a reducer that `state.py` argues against on its own merits.
+the fan-out as well, so the oracle guarantee survives one task per call — though only from the run
+config, which is why `guard_node` refuses to dispatch without it. What did not survive is the
+single-writer verdict: the fold moved out to `fold_node`, rather than give the key a reducer that
+`state.py` argues against on its own merits.
 
 Which is the honest shape of the choice, and worth seeing once: the framework does not lack a
 place to put this. It lacks the judgement, and it owns the state you would need to keep.
