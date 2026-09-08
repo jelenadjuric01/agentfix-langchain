@@ -55,6 +55,30 @@ The seams also cost something, which is the second reason this belongs in your n
 checkpoint, and they leak into the next run. In `AgentState` they are scoped to the run, because
 the state is.
 
+`post_model_hook` is the one worth answering properly, because it looks like a fit. Its router
+diffs the tool calls the model made against the `tool_call_id`s already answered and dispatches
+only what is left — so answering a call inside the hook is precisely what refuses it. That is the
+guard contract, handed to you, and it is tidier than the synthetic `AIMessage` `tools_node` builds
+today. Two things stand in the way, and only the second is interesting:
+
+1. It is a `create_react_agent` argument, not a `StateGraph` one, so you cannot pass it here. But
+   the *shape* is reproducible in a hand-built graph in about four lines — `Send` is public.
+2. That shape sends one task per call, which makes the tool step a **concurrent writer**, and
+   `AgentState.tests_passed` has no reducer. Two tool calls in one turn and it raises
+   `InvalidUpdateError: At key 'tests_passed': Can receive only one value per step`.
+
+Both halves are measured, so you can check rather than take it on faith:
+
+    uv run python -m unittest tests.test_hook_alternative -v
+
+The same file also settles the obvious worry in the other direction: `max_concurrency=1` throttles
+the fan-out as well, so the oracle guarantee `tools_node` protects would survive the change. What
+would not survive is the single-writer verdict — the fold would have to move out of the guard's
+node, or the key would need a reducer that `state.py` argues against on its own merits.
+
+Which is the honest shape of the choice, and worth seeing once: the framework does not lack a
+place to put this. It lacks the judgement, and it owns the state you would need to keep.
+
 ## Run it
 
     uv run python -m unittest exercises.stage_2.test_stage_2 -v

@@ -34,6 +34,19 @@ What it does NOT do, and this is the part worth the workshop's time:
     builds this very guard on `wrap_tool_call` and records the measured cost: its counters
     live on the middleware instance, so they survive no checkpoint and they leak into the
     next run. Here they are `AgentState` fields, scoped to the run because the state is.
+
+    `post_model_hook` deserves the specific answer, because it looks like it would fit and it
+    is not simply a node. Its router diffs the answered `tool_call_id`s against the model's
+    calls and `Send`s only what is left, so answering a call in the hook is what refuses it —
+    the guard contract, supplied. It is also not available here: it is a `create_react_agent`
+    argument, not a `StateGraph` one. The shape, however, IS reproducible — `Send` is public —
+    so what decides it is the bill, and both halves are measured in
+    tests/test_hook_alternative.py. The good half: `max_concurrency=1` throttles the fan-out
+    too, so the oracle guarantee below survives it. The bad half: one task per call makes the
+    tool step a CONCURRENT writer, and `tests_passed` has no reducer, so two calls in one turn
+    raise `InvalidUpdateError`. The verdict fold would have to leave this node, or the key
+    would have to take a reducer that state.py argues against. Adopting the framework's shape
+    would delete the synthetic AIMessage below and pay for it in the state schema instead.
   - The step budget, here. `recursion_limit` counts node executions, not model turns. LangChain
     1.x ships `ModelCallLimitMiddleware`, which counts the right thing; agent/prebuilt.py uses
     it, and records the ordering trap that makes it silently do nothing.
