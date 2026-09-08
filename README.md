@@ -266,11 +266,16 @@ behind it. Needs `--extra prebuilt`.
 - **`handle_tool_errors` defaults to letting a tool's exception kill the run.** You have to opt
   back in — and passing a *string* rather than `True` silently discards the specific error, so the
   model stops being told which argument it forgot.
-- **The loop guard.** The seams exist — `wrap_tool_call` in LangChain 1.x middleware, and a
-  `post_model_hook` if you build the agent with `create_react_agent` — but a seam is only a place
-  to put a decision, and the state behind it is the framework's: `agent/prebuilt.py` builds this
-  guard on `wrap_tool_call`, and its counters survive no checkpoint and leak into the next run.
-  Writing the policy is Stage 2 of the workshop. It also leaves you
+- **The loop guard's policy — though not its plumbing.** The agent borrows the framework's own
+  shape here: `create_react_agent` wires `post_model_hook` by diffing the answered
+  `tool_call_id`s against the calls the model made and dispatching only what is left, so
+  answering a call is what refuses it. `guard_node` and `route_after_guard` are that router,
+  reproduced, because the hook is a `create_react_agent` argument while `Send` is public. What no
+  seam supplies is the claim that an identical call means the model is stuck, which is Stage 2 of
+  the workshop. Two costs came with the shape, both measured in
+  `tests/test_hook_alternative.py`: the verdict fold moved to `fold_node` to stay a single
+  writer, and serialising a turn's calls became the run config's job, so `guard_node` refuses to
+  dispatch without `max_concurrency=1`. It also leaves you
   the invariant the guard has to respect: every tool call needs exactly one reply, keyed by
   `tool_call_id`, so even a call you REFUSE to run still has to be answered. Skip one and the
   *next* request is rejected, a turn away from the code that caused it.
