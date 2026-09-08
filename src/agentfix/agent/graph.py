@@ -383,19 +383,23 @@ def build_graph(
         return {"messages": [HumanMessage(content=NUDGE)]}
 
     def route_after_agent(state: AgentState) -> str:
-        """Where to go after a model turn. The only place a run can end successfully.
-
-        Return one of "guard", "nudge", or END. "guard" is the tool step: it screens the calls
-        the model made and dispatches whatever it lets through.
-
-        `is_done(state)` reads the verdict. `state["step"]` is the turn just taken and
-        `max_steps` the budget. `message.tool_calls` is what the model asked for.
-
-        EXERCISE(stage-1): see exercises/stage_1/README.md
-        """
+        """Where to go after a model turn. The only place a run can end successfully."""
         message = state["messages"][-1]
         assert isinstance(message, AIMessage)
-        raise NotImplementedError("stage 1: decide where a run goes after a model turn")
+
+        # Tool calls never end the run on their own — always execute them and loop back, so
+        # the model can read the results. Note this skips the `is_done` check on purpose: the
+        # check belongs on a turn where the model had nothing more to do.
+        if message.tool_calls:
+            return "guard"
+
+        # Prose. This is the only place the run can end successfully — and it ends because the
+        # tests pass, not because the model stopped calling tools.
+        if is_done(state):
+            return END
+        if state["step"] >= max_steps:
+            return END
+        return "nudge"
 
     def route_after_guard(state: AgentState) -> str | list[Send]:
         """Dispatch whatever the guard let through. The framework's router, reproduced.

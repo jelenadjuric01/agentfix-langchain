@@ -24,8 +24,8 @@ name the packages `agentfix` / `agentlang` / `agentgraph` so all three can live 
 repository is the standalone version: same agent, same exercises, `uv` and git branches instead of
 the plugin.
 
-> **You are on `main`, the exercise branch.** Two functions in
-> `src/agentfix/agent/graph.py` are deliberately unwritten, so the exercise tests fail and
+> **You are at `stage-1-solution`.** Stage 1 is written for you; the stage-2 guard in
+> `src/agentfix/agent/graph.py` is still unwritten, so its exercise tests fail and
 > `agentfix solve` stops with a pointer to `exercises/README.md`. That is the intended starting
 > point. For the finished agent: `git checkout solutions`.
 
