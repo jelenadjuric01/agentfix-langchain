@@ -28,9 +28,12 @@ What it does NOT do, and this is the part worth the workshop's time:
 
   - `handle_tool_errors` defaults to letting a tool's exception propagate and kill the run.
     The original guaranteed dispatch never raises. We opt back in, below.
-  - The loop guard. LangGraph has no hook for it at all. LangChain 1.x middleware does give
-    you the seam (`wrap_tool_call`), but the policy — a repeated call means the model is stuck
-    — is still yours. See agent/prebuilt.py.
+  - The loop guard. The seams exist — `wrap_tool_call` in LangChain 1.x middleware, and a
+    `post_model_hook` if you build the agent with `create_react_agent` — but a seam is only a
+    place to put a decision, and the framework owns the state behind it. agent/prebuilt.py
+    builds this very guard on `wrap_tool_call` and records the measured cost: its counters
+    live on the middleware instance, so they survive no checkpoint and they leak into the
+    next run. Here they are `AgentState` fields, scoped to the run because the state is.
   - The step budget, here. `recursion_limit` counts node executions, not model turns. LangChain
     1.x ships `ModelCallLimitMiddleware`, which counts the right thing; agent/prebuilt.py uses
     it, and records the ordering trap that makes it silently do nothing.

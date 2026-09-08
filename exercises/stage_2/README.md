@@ -39,9 +39,21 @@ unknown tool names. It will not do this. No framework knows that a repeated call
 model has stopped learning from what it is told — that is a fact about a 12B model on a
 three-file project, and facts like that stay in your code.
 
-LangChain 1.x does now give you a *seam* for it (`wrap_tool_call`, see `agent/prebuilt.py`), but
-the policy is still yours to write. Which is the whole point of the workshop: the framework
-absorbed the plumbing and left you the judgement.
+Seams for it do exist, and it is worth knowing where, because sooner or later you will go looking.
+LangChain 1.x middleware gives you `wrap_tool_call` (see `agent/prebuilt.py`); `create_react_agent`
+takes a `post_model_hook` that runs after the model has proposed its calls; LangChain even ships a
+`ToolCallLimitMiddleware` that blocks over-budget calls and answers each one with a `ToolMessage`.
+
+None of them is the answer. That middleware counts calls per tool *name* and never inspects the
+arguments, so it cannot tell three reads of three files from three reads of the same file — a
+budget, not a repetition detector. The other two are places to put a decision, and the policy is
+still yours to write. Which is the whole point of the workshop: the framework absorbed the
+plumbing and left you the judgement.
+
+The seams also cost something, which is the second reason this belongs in your node.
+`agent/prebuilt.py`'s guard keeps its counters on the middleware instance: they survive no
+checkpoint, and they leak into the next run. In `AgentState` they are scoped to the run, because
+the state is.
 
 ## Run it
 
